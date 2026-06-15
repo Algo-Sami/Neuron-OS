@@ -1,0 +1,5 @@
+export const RECYCLE_BIN_EXPIRY_DAYS = 10;
+export const MAX_FILE_SIZE_MB = 50;
+export const MAX_QUIZ_TEXT_LENGTH = 15000;
+export const MAX_CLASSIFICATION_TEXT_LENGTH = 10000;
+export const MIN_USERNAME_LENGTH = 3;

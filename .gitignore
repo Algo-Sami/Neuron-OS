@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# reports and logs
+background_logs.txt
+lint_full_report.txt
+lint_results.txt
+lint_results_full.json
+lint_results_utf8.txt
+
