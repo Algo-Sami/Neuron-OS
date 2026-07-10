@@ -1,0 +1,18 @@
+{
+  // Disable the built-in CSS validator — it doesn't understand Tailwind v4
+  // at-rules (@apply, @theme, @custom-variant). The Tailwind IntelliSense
+  // extension provides proper validation instead.
+  "css.validate": false,
+  "scss.validate": false,
+  "less.validate": false,
+
+  // Tell Tailwind IntelliSense where to find class usages
+  "tailwindCSS.experimental.classRegex": [],
+  "tailwindCSS.includeLanguages": {
+    "typescript": "javascript",
+    "typescriptreact": "javascript"
+  },
+
+  // Suppress "Unknown at rule" warnings from the CSS language server
+  "css.lint.unknownAtRules": "ignore"
+}
