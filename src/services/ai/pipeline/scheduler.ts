@@ -13,6 +13,8 @@ import { generateSummaryPDF } from '@/services/pdf/study-pack-pdf';
 import { FolderSyncService } from './folder-sync-service';
 import { GeneratedPdfResult } from './pdf-generator-service';
 import { PipelineValidator } from './context-validator';
+import { JobRecoveryService } from './job-recovery-service';
+import { JOB_HEARTBEAT_INTERVAL_MS } from './recovery-constants';
 
 export interface SchedulerOptions {
   forceRun?: boolean;
@@ -20,12 +22,12 @@ export interface SchedulerOptions {
   destinationFolderId?: string;
 }
 
-
-
-
 export class AIJobScheduler {
   private progressState!: TaskProgress;
   private logEntries: any[] = [];
+  private workerId: string;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private isLeaseLost: boolean = false;
 
   constructor(
     private supabase: SupabaseClient,
@@ -34,7 +36,30 @@ export class AIJobScheduler {
     private taskId: string,
     private options: SchedulerOptions = {}
   ) {
+    this.workerId = JobRecoveryService.generateWorkerId();
     this.initProgressState();
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(async () => {
+      const ok = await JobRecoveryService.sendHeartbeat(this.supabase, this.taskId, this.workerId);
+      if (!ok) {
+        this.isLeaseLost = true;
+        this.logDisk('heartbeat', `Worker ${this.workerId} lost task lease. Aborting background processing.`, 'WARN');
+      }
+    }, JOB_HEARTBEAT_INTERVAL_MS);
+
+    if (this.heartbeatTimer.unref) {
+      this.heartbeatTimer.unref();
+    }
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   private initProgressState() {
@@ -69,6 +94,11 @@ export class AIJobScheduler {
   }
 
   private async saveProgress(status: string, errorMessage?: string) {
+    if (this.isLeaseLost) {
+      this.logDisk('progress', 'Task lease lost to another worker. Aborting.', 'WARN');
+      throw new Error('LEASE_LOST');
+    }
+
     const now = new Date().toISOString();
 
     // Check if task is cancelled or deleted (e.g. during account deletion)
@@ -130,8 +160,21 @@ export class AIJobScheduler {
 
     this.logDisk('init', '═══════════════════════════════════════════', 'INFO');
     this.logDisk('init', `Upload Started — documentId: ${this.documentId}`, 'INFO');
-    this.logDisk('init', `AI Ingestion Pipeline started. TaskId: ${this.taskId}`, 'INFO');
+    this.logDisk('init', `AI Ingestion Pipeline started. TaskId: ${this.taskId}, Worker: ${this.workerId}`, 'INFO');
     this.logDisk('init', '═══════════════════════════════════════════', 'INFO');
+
+    // ── 0. Atomic Task Claim ────────────────────────────────────────────────
+    const claimResult = await JobRecoveryService.claimTask(this.supabase, this.taskId, this.workerId);
+    if (!claimResult.success) {
+      this.logDisk(
+        'init',
+        `Could not claim task ${this.taskId} (reason: ${claimResult.reason}, lockedBy: ${claimResult.lockedBy}). Aborting to avoid duplicate run.`,
+        'WARN'
+      );
+      return;
+    }
+
+    this.startHeartbeat();
 
     try {
       // ── 1. Fetch Document Details ──────────────────────────────────────────
@@ -322,9 +365,17 @@ export class AIJobScheduler {
         });
 
         this.logDisk('chunking', `Saving ${chunkPayloads.length} chunks to database...`, 'INFO');
+        // Conflict-safe upsert: if a concurrent scheduler already wrote the same
+        // (document_id, chunk_index) row, silently skip it — DO NOTHING.
+        // This satisfies the Phase 2B-2 unique constraint on document_chunks
+        // without crashing a duplicate scheduler execution.
+        // Any non-conflict database error still surfaces as a fatal pipeline failure.
         const { error: dbInsertErr } = await this.supabase
           .from('document_chunks')
-          .insert(chunkPayloads);
+          .upsert(chunkPayloads, {
+            onConflict: 'document_id,chunk_index',
+            ignoreDuplicates: true,
+          });
 
         if (dbInsertErr) {
           throw new Error(`Chunk Generation Failed — database insert error: ${dbInsertErr.message}`);
@@ -748,6 +799,14 @@ export class AIJobScheduler {
       this.logDisk('init', 'Pipeline Completed', 'INFO');
       await this.saveProgress('Completed');
 
+      await JobRecoveryService.completeTask(
+        this.supabase,
+        this.taskId,
+        this.workerId,
+        this.progressState,
+        this.logEntries
+      );
+
       this.logDisk('init', '═══════════════════════════════════════════', 'INFO');
       this.logDisk('init', `Processing Completed — "${docTitle}"`, 'INFO');
       this.logDisk('init', '═══════════════════════════════════════════', 'INFO');
@@ -760,6 +819,11 @@ export class AIJobScheduler {
         return;
       }
 
+      if (errMsg === 'LEASE_LOST') {
+        this.logDisk('fatal', 'Pipeline aborted — task lease was lost or claimed by another worker.', 'WARN');
+        return;
+      }
+
       this.logDisk('fatal', `Pipeline encountered a fatal error: ${errMsg}`, 'ERROR');
       this.logDisk('fatal', `Total elapsed: ${((Date.now() - pipelineStartMs) / 1000).toFixed(2)}s`, 'ERROR');
 
@@ -769,6 +833,17 @@ export class AIJobScheduler {
       }).eq('document_id', this.documentId).maybeSingle();
 
       await this.saveProgress('Failed', errMsg).catch(() => {});
+
+      await JobRecoveryService.failTask(
+        this.supabase,
+        this.taskId,
+        this.workerId,
+        errMsg,
+        this.progressState,
+        this.logEntries
+      );
+    } finally {
+      this.stopHeartbeat();
     }
   }
 }

@@ -183,18 +183,27 @@ export function classifyFilename(
     }
   }
 
-  if (cutIndex > 0) {
-    const subjectPrefix = nameWithoutExt.substring(0, cutIndex);
-    const normalizedSubject = normalizeSubjectName(subjectPrefix);
+  if (cutIndex >= 0 && matchedFolderName) {
+    if (cutIndex > 0) {
+      const subjectPrefix = nameWithoutExt.substring(0, cutIndex);
+      const normalizedSubject = normalizeSubjectName(subjectPrefix);
 
-    if (normalizedSubject.length >= 2) {
-      return {
-        subjectName: normalizedSubject,
-        folderName: matchedFolderName,
-        labSubfolderName: matchedFolderName === "Lab" ? getLabSubfolder(nameWithoutExt) : null,
-        confidence: 0.90,
-      };
+      if (normalizedSubject.length >= 2) {
+        return {
+          subjectName: normalizedSubject,
+          folderName: matchedFolderName,
+          labSubfolderName: matchedFolderName === "Lab" ? getLabSubfolder(nameWithoutExt) : null,
+          confidence: 0.90,
+        };
+      }
     }
+
+    return {
+      subjectName: "General Study",
+      folderName: matchedFolderName,
+      labSubfolderName: matchedFolderName === "Lab" ? getLabSubfolder(nameWithoutExt) : null,
+      confidence: 0.80,
+    };
   }
 
   // Fallback: If no keyword index can split the filename, normalize the whole filename (excluding extension)

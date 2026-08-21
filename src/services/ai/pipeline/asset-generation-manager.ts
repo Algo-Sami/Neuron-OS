@@ -21,6 +21,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
 import { AssetType, AssetStatus, KnowledgeAsset, KnowledgeAssetRegistry } from './knowledge-asset-registry';
 import { isVersionOutdated, getEffectiveVersion, formatVersionLog } from './ai-version-manifest';
+import { JobRecoveryService } from './job-recovery-service';
 import * as fs from 'fs';
 
 // ── Dependency Graph Definition ────────────────────────────────────────────────
@@ -75,7 +76,7 @@ export interface GenerationPlan {
 
 export class AssetGenerationManager {
 
-  // ── 1. Generation Assessment & Decisions ──────────────────────────────────────
+  // ── 1. Assessment & Dependency Resolution ─────────────────────────────────────
 
   /**
    * Assesses whether a target asset is ready, can be generated, or is blocked by dependencies.
@@ -92,6 +93,9 @@ export class AssetGenerationManager {
     AssetGenerationManager.logToDisk(`${logPrefix} assessing...`);
 
     try {
+      // Auto-recover any stale asset generation jobs for this document before assessing
+      await JobRecoveryService.recoverStaleAssetJobs(supabase, documentId);
+
       // 1. Get dependencies
       const dependencies = ASSET_DEPENDENCY_GRAPH[assetType] || [];
       const missingPrerequisites: AssetType[] = [];
@@ -138,12 +142,12 @@ export class AssetGenerationManager {
         AssetGenerationManager.logToDisk(`${logPrefix} Blocked: Missing prerequisites: ${missingPrerequisites.join(', ')}`);
         return {
           action: 'wait_for_prerequisite',
-          reason: `Waiting for prerequisite assets to be generated: ${missingPrerequisites.join(', ')}`,
+          reason: `Waiting for prerequisites: ${missingPrerequisites.join(', ')}`,
           missingPrerequisites
         };
       }
 
-      // 3. Prerequisites met. Now assess the target asset.
+      // 3. Evaluate target asset
       const targetAsset = await KnowledgeAssetRegistry.findExisting(supabase, documentId, assetType, mode);
 
       if (targetAsset) {
@@ -252,6 +256,9 @@ export class AssetGenerationManager {
     AssetGenerationManager.logToDisk(`[JobStart] Recording start for Doc: ${documentId}, Type: ${assetType}, Mode: ${modeStr}`);
 
     try {
+      // Auto-recover any stale asset generation jobs for this document before starting
+      await JobRecoveryService.recoverStaleAssetJobs(supabase, documentId);
+
       // 1. Check if a job is already running to guarantee concurrency locks
       const { data: existingJob } = await supabase
         .from('asset_generation_jobs')
@@ -275,15 +282,20 @@ export class AssetGenerationManager {
         });
       } else {
         // Pre-create the asset registry row in 'generating' state
-        await supabase.from('knowledge_assets').insert({
-          user_id: userId,
-          document_id: documentId,
-          asset_type: assetType,
-          mode,
-          status: 'generating',
-          knowledge_version: 1,
-          version: 1
-        });
+        // Wrapped in try/catch to safely ignore 23505 if a concurrent worker created it
+        try {
+          await supabase.from('knowledge_assets').insert({
+            user_id: userId,
+            document_id: documentId,
+            asset_type: assetType,
+            mode,
+            status: 'generating',
+            knowledge_version: 1,
+            version: 1
+          });
+        } catch {
+          // Benign race: concurrent worker already inserted row
+        }
       }
 
       // 3. Create active tracking job
@@ -304,6 +316,24 @@ export class AssetGenerationManager {
         .single();
 
       if (error) {
+        if (error.code === '23505' || error.message?.includes('uq_active_generation_job')) {
+          // Another concurrent worker acquired the active generation lock first.
+          // Re-fetch the race winner's job ID.
+          logger.info(`[AssetManager] Concurrent job lock race (23505) for Doc: ${documentId}, Type: ${assetType}. Re-fetching winner.`);
+          const { data: winnerJob } = await supabase
+            .from('asset_generation_jobs')
+            .select('id')
+            .eq('document_id', documentId)
+            .eq('asset_type', assetType)
+            .eq('mode', modeStr)
+            .in('status', ['queued', 'running'])
+            .maybeSingle();
+
+          if (winnerJob) {
+            return winnerJob.id;
+          }
+        }
+
         logger.error(`[AssetManager] Failed to create job record: ${error.message}`);
         return null;
       }

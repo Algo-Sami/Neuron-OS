@@ -19,6 +19,8 @@ export async function saveUploadMetadata({
   fileSize: number;
   subjectId?: string;
 }) {
+  const t0 = performance.now();
+  console.log(`[UploadTiming] saveUploadMetadata START for "${fileName}"`);
   const supabase = await createClient()
 
   // 1. Authenticate Request
@@ -70,13 +72,6 @@ export async function saveUploadMetadata({
       }
       resolvedSubjectId = newSubject.id
       console.log(`[Upload Routing] Created new subject: "${classification.subjectName}" (id=${resolvedSubjectId})`);
-
-      // Scaffold default folders automatically
-      try {
-        await scaffoldSubjectFoldersAction(newSubject.id)
-      } catch (scaffoldErr) {
-        console.error(`[Upload Routing] Failed to scaffold folders for subject ${newSubject.id}:`, scaffoldErr)
-      }
     }
   } else {
     // If classification confidence is low, fallback to subjectId chosen during upload
@@ -107,12 +102,6 @@ export async function saveUploadMetadata({
           throw new Error(`Failed to create default subject: ${defaultSubjectError.message}`)
         }
         resolvedSubjectId = newDefault.id
-
-        try {
-          await scaffoldSubjectFoldersAction(newDefault.id)
-        } catch (scaffoldErr) {
-          console.error(`[Upload Routing] Failed to scaffold folders for default subject ${newDefault.id}:`, scaffoldErr)
-        }
       }
       classificationStatus = 'needs_review'
     }
@@ -202,13 +191,21 @@ export async function saveUploadMetadata({
       if (existingFolder) {
         resolvedFolderId = existingFolder.id
       } else {
-        try {
-          const folderRes = await createFolderAction(classification.folderName, resolvedSubjectId, null, false)
-          if (folderRes.success && folderRes.folder) {
-            resolvedFolderId = folderRes.folder.id
-            console.log(`[Upload Routing] Created folder: "${classification.folderName}" (id=${resolvedFolderId})`);
-          }
-        } catch (folderErr) {
+        const { data: newFolder, error: folderErr } = await supabase
+          .from('folders')
+          .insert({
+            user_id: user.id,
+            subject_id: resolvedSubjectId,
+            parent_folder_id: null,
+            name: classification.folderName
+          })
+          .select('id')
+          .single()
+
+        if (!folderErr && newFolder) {
+          resolvedFolderId = newFolder.id
+          console.log(`[Upload Routing] Created folder: "${classification.folderName}" (id=${resolvedFolderId})`);
+        } else if (folderErr) {
           console.error(`[Upload Routing] Failed to create folder ${classification.folderName}:`, folderErr)
         }
       }
@@ -258,29 +255,48 @@ export async function saveUploadMetadata({
     throw new Error(`Failed to create document: ${docError.message}`)
   }
 
-  // 6. Log a background task record
+  // 6. Log a background task record (task_type: 'study_pack' aligns with AIProcessingCenter
+  //    and the idempotency check inside /api/generate-study-pack).
+  //    Non-throwing: a failure here must never abort a successful upload.
+  //    After Phase 2B-2, the unique constraint on (user_id, document_id, task_type)
+  //    may reject this insert if a concurrent request already created the same task.
+  //    That is a benign race condition — the /api/generate-study-pack route will find
+  //    the existing pending task and transition it to Queued before dispatching.
   try {
     const { error: taskError } = await supabase
       .from('background_tasks')
       .insert({
         user_id: user.id,
         document_id: docResult.id,
-        task_type: 'ai_processing',
+        task_type: 'study_pack',
         status: 'pending'
-      })
+      });
     if (taskError) {
-      console.warn("[Upload Routing] Failed to insert background task record (migration may be missing):", taskError.message)
+      // PostgreSQL unique_violation — another concurrent request already created
+      // the same logical task. This is expected and harmless; the dispatcher will
+      // pick up the existing record.
+      if (taskError.code === '23505') {
+        console.info(
+          `[Upload Routing] background_tasks unique conflict (23505) for document ${docResult.id} — ` +
+          'a concurrent request already registered this task. Upload continues normally.'
+        );
+      } else {
+        // Unexpected database error — log clearly but do not throw.
+        console.warn(
+          `[Upload Routing] Unexpected error creating background task record for document ${docResult.id}: ` +
+          `${taskError.message} (code: ${taskError.code ?? 'unknown'})`
+        );
+      }
     }
   } catch (err) {
-    console.warn("[Upload Routing] Exception while creating background task record:", err)
+    // Structural/network-level exception — log but do not abort the upload.
+    console.warn('[Upload Routing] Exception while creating background task record:', err);
   }
 
-  // Award XP for uploading study materials
-  try {
-    await awardXP(user.id, 'upload_notes');
-  } catch (xpError) {
+  // Award XP for uploading study materials (non-blocking)
+  awardXP(user.id, 'upload_notes').catch((xpError) => {
     console.error("Failed to award upload XP:", xpError);
-  }
+  });
 
   // Revalidate views
   revalidatePath('/uploads')
@@ -290,6 +306,7 @@ export async function saveUploadMetadata({
     revalidatePath(`/subjects/${resolvedSubjectId}`)
   }
   
+  console.log(`[UploadTiming] saveUploadMetadata COMPLETED in ${(performance.now() - t0).toFixed(0)}ms for document ${docResult.id}`);
   return { success: true, documentId: docResult.id }
 }
 

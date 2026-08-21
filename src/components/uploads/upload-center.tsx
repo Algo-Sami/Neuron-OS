@@ -250,10 +250,13 @@ function UploadArea({
       const filePath = `${user.id}/${Date.now()}_${cleanName}`;
       setProgress(25);
 
+      const tStorage = performance.now();
+      console.log(`[UploadTiming] [UploadCenter] Supabase storage upload START: ${filePath}`);
       const { error: storageErr } = await supabase.storage
         .from("documents")
         .upload(filePath, file, { cacheControl: "3600", upsert: false });
       if (storageErr) throw storageErr;
+      console.log(`[UploadTiming] [UploadCenter] Supabase storage upload END in ${(performance.now() - tStorage).toFixed(0)}ms`);
       setProgress(70);
 
       const {
@@ -261,6 +264,8 @@ function UploadArea({
       } = supabase.storage.from("documents").getPublicUrl(filePath);
 
       const ext = file.name.split(".").pop()?.toLowerCase() || "unknown";
+      const tMeta = performance.now();
+      console.log(`[UploadTiming] [UploadCenter] saveUploadMetadata START`);
       const result = await saveUploadMetadata({
         fileName: file.name,
         fileUrl: publicUrl,
@@ -268,6 +273,7 @@ function UploadArea({
         fileSize: file.size,
         subjectId: selectedSubjectId || undefined,
       });
+      console.log(`[UploadTiming] [UploadCenter] saveUploadMetadata END in ${(performance.now() - tMeta).toFixed(0)}ms`);
       setProgress(90);
 
       // Intelligent AI trigger decision (Phase 2.2)
@@ -275,6 +281,7 @@ function UploadArea({
         const classification = classifyFile(file.name);
 
         const fireStudyPack = () => {
+          console.log(`[UploadTiming] [UploadCenter] Dispatching /api/generate-study-pack fire-and-forget`);
           fetch("/api/generate-study-pack", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -283,6 +290,8 @@ function UploadArea({
               fileUrl: publicUrl,
               fileType: ext,
             }),
+          }).then(() => {
+            console.log(`[UploadTiming] [UploadCenter] /api/generate-study-pack response received`);
           }).catch((err) => {
             console.warn("Failed to fire-and-forget study pack generation", err);
           });

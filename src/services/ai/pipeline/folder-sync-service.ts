@@ -8,6 +8,21 @@ export class FolderSyncService {
 
   /**
    * Resolve or create a folder with a given name under a given parent.
+   *
+   * Concurrency-safe pattern:
+   *   1. SELECT existing folder (fast common path — finds it in most calls)
+   *   2. If found → return existing ID
+   *   3. If not found → attempt INSERT
+   *   4. INSERT succeeds → return new ID
+   *   5. INSERT returns 23505 → another concurrent scheduler created it first;
+   *      re-fetch the race-winner record and return its ID
+   *   6. INSERT returns any other error → throw (not swallowed)
+   *
+   * The existing partial expression indexes on folders
+   * (idx_folders_unique_parent_name, idx_folders_unique_root_name, etc.)
+   * enforce uniqueness at the DB level. Supabase/PostgREST cannot target
+   * expression-based indexes via onConflict, so we handle 23505 manually.
+   *
    * Returns the id of the existing or newly created folder.
    */
   private async resolveOrCreateFolder(
@@ -16,6 +31,7 @@ export class FolderSyncService {
     parentFolderId: string | null,
     folderName: string
   ): Promise<string> {
+    // ── Step 1: Check if folder already exists ────────────────────────────────
     const { data: list, error: listErr } = parentFolderId
       ? await this.supabase
           .from('folders')
@@ -31,7 +47,7 @@ export class FolderSyncService {
           .is('parent_folder_id', null);
 
     if (listErr) {
-      throw new Error(`Failed to list folders (parent=${parentFolderId ?? 'null'}): ${listErr.message}`);
+      throw new Error(`[FolderSync] Failed to list folders (parent=${parentFolderId ?? 'null'}): ${listErr.message}`);
     }
 
     const existing = (list || []).find(
@@ -39,11 +55,13 @@ export class FolderSyncService {
     );
 
     if (existing) {
-      logger.info(`[FolderSyncService] Reusing folder "${folderName}" (id=${existing.id})`);
+      logger.info(`[FolderSync] Reusing folder "${folderName}" (id=${existing.id})`);
       return existing.id as string;
     }
 
-    logger.info(`[FolderSyncService] Creating folder "${folderName}" under parent=${parentFolderId ?? 'root'}...`);
+    // ── Step 2: Folder does not exist — attempt atomic INSERT ────────────────
+    logger.info(`[FolderSync] Creating folder "${folderName}" under parent=${parentFolderId ?? 'root'}...`);
+
     const { data: created, error: createErr } = await this.supabase
       .from('folders')
       .insert({
@@ -55,10 +73,56 @@ export class FolderSyncService {
       .select('id')
       .single();
 
-    if (createErr || !created) {
-      throw new Error(`Could not create folder "${folderName}": ${createErr?.message}`);
+    if (!createErr && created) {
+      logger.info(`[FolderSync] Created folder "${folderName}" (id=${created.id})`);
+      return created.id as string;
     }
-    return created.id as string;
+
+    // ── Step 3: Handle concurrent creation (23505 unique violation) ──────────
+    if (createErr.code === '23505') {
+      logger.info(
+        `[FolderSync] Concurrent folder creation detected for "${folderName}"; re-fetching winner...`
+      );
+
+      const { data: winner, error: refetchErr } = parentFolderId
+        ? await this.supabase
+            .from('folders')
+            .select('id, name')
+            .eq('user_id', userId)
+            .eq('subject_id', subjectId)
+            .eq('parent_folder_id', parentFolderId)
+            .ilike('name', folderName)
+            .maybeSingle()
+        : await this.supabase
+            .from('folders')
+            .select('id, name')
+            .eq('user_id', userId)
+            .eq('subject_id', subjectId)
+            .is('parent_folder_id', null)
+            .ilike('name', folderName)
+            .maybeSingle();
+
+      if (refetchErr) {
+        throw new Error(
+          `[FolderSync] Failed to re-fetch folder "${folderName}" after 23505 conflict: ${refetchErr.message}`
+        );
+      }
+
+      if (!winner) {
+        // DB reported a uniqueness conflict but the winning row cannot be located.
+        // This should not happen under normal conditions — surface clearly.
+        throw new Error(
+          `[FolderSync] 23505 conflict on folder "${folderName}" but re-fetch returned no record. ` +
+          'Database may be in an inconsistent state.'
+        );
+      }
+
+      logger.info(`[FolderSync] Reusing race winner folder "${folderName}" (id=${winner.id})`);
+      return winner.id as string;
+    }
+
+    // ── Step 4: Any other database error — do not swallow ────────────────────
+    throw new Error(`[FolderSync] Could not create folder "${folderName}": ${createErr.message}`);
   }
 
   async run(
@@ -68,7 +132,7 @@ export class FolderSyncService {
     pdfs: GeneratedPdfResult[],
     subjectName: string
   ): Promise<string> {
-    logger.info(`[FolderSyncService] Synchronizing generated PDFs for user ${userId}, subject: ${subjectId}`);
+    logger.info(`[FolderSync] Synchronizing generated PDFs for user ${userId}, subject: ${subjectId}`);
 
     // ── 1. Resolve or create root "AI Generated" folder ──────────────────────
     const rootFolderId = await this.resolveOrCreateFolder(userId, subjectId, null, 'AI Generated');
@@ -101,7 +165,7 @@ export class FolderSyncService {
       const fileTitle = pdf.customFileName || `${cleanDocTitle} – ${pdf.suffixName}.pdf`;
 
       try {
-        // Uniqueness check
+        // ── Step 4a: Check if this document link already exists ───────────────
         const { data: existingDoc, error: checkErr } = await this.supabase
           .from('documents')
           .select('id')
@@ -112,15 +176,16 @@ export class FolderSyncService {
           .maybeSingle();
 
         if (checkErr) {
-          logger.warn(`[FolderSyncService] Error checking duplicates for "${fileTitle}": ${checkErr.message}`);
+          logger.warn(`[FolderSync] Error checking duplicates for "${fileTitle}": ${checkErr.message}`);
         }
 
         if (existingDoc) {
-          logger.info(`[FolderSyncService] Resource "${fileTitle}" already synced. Skipping.`);
+          logger.info(`[FolderSync] Resource "${fileTitle}" already synced. Skipping.`);
           continue;
         }
 
-        logger.info(`[FolderSyncService] Synchronizing resource "${fileTitle}"...`);
+        // ── Step 4b: Attempt atomic INSERT ────────────────────────────────────
+        logger.info(`[FolderSync] Synchronizing resource "${fileTitle}"...`);
         const { error: insErr } = await this.supabase
           .from('documents')
           .insert({
@@ -141,16 +206,30 @@ export class FolderSyncService {
             size: pdf.size,
           });
 
-        if (insErr) {
-          logger.error(`[FolderSyncService] Failed to insert "${fileTitle}": ${insErr.message}`);
-        } else {
-          logger.info(`[FolderSyncService] ✓ Synced "${fileTitle}"`);
+        if (!insErr) {
+          logger.info(`[FolderSync] ✓ Synced "${fileTitle}"`);
+          continue;
         }
+
+        // ── Step 4c: Handle concurrent document creation (23505) ─────────────
+        if (insErr.code === '23505') {
+          // Another concurrent scheduler created this document link first.
+          // The DB unique constraint idx_documents_unique_folder_title prevents
+          // a duplicate — treat this as a benign race and continue as success.
+          logger.info(
+            `[FolderSync] Concurrent document creation detected for "${fileTitle}"; reusing existing document.`
+          );
+          continue;
+        }
+
+        // ── Step 4d: Any other insert error — log but preserve outer-loop behavior
+        logger.error(`[FolderSync] Failed to insert "${fileTitle}": ${insErr.message} (code: ${insErr.code ?? 'unknown'})`);
       } catch (err: any) {
-        logger.error(`[FolderSyncService] Exception syncing "${fileTitle}": ${err.message}`);
+        logger.error(`[FolderSync] Exception syncing "${fileTitle}": ${err.message}`);
       }
     }
 
+    logger.info(`[FolderSync] Synchronization completed for "${cleanDocTitle}" (subFolder=${subFolderId})`);
     return subFolderId;
   }
 }

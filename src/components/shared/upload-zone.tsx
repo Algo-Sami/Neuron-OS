@@ -84,6 +84,8 @@ export function UploadZone({ onUploadComplete }: { onUploadComplete?: (documentI
       setProgress(25)
 
       // Upload directly to Supabase Storage
+      const tStorage = performance.now();
+      console.log(`[UploadTiming] Supabase storage upload START: ${filePath}`);
       const { error } = await supabase.storage
         .from('documents')
         .upload(filePath, file, {
@@ -94,6 +96,7 @@ export function UploadZone({ onUploadComplete }: { onUploadComplete?: (documentI
       if (error) {
         throw error
       }
+      console.log(`[UploadTiming] Supabase storage upload END in ${(performance.now() - tStorage).toFixed(0)}ms`);
 
       setProgress(75)
 
@@ -106,14 +109,35 @@ export function UploadZone({ onUploadComplete }: { onUploadComplete?: (documentI
       const extension = file.name.split('.').pop()?.toLowerCase() || 'unknown'
       
       // Save metadata to the relational database securely via Server Action
+      const tMeta = performance.now();
+      console.log(`[UploadTiming] saveUploadMetadata START`);
       const result = await saveUploadMetadata({
         fileName: file.name,
         fileUrl: publicUrl,
         fileType: extension,
         fileSize: file.size
       })
+      console.log(`[UploadTiming] saveUploadMetadata END in ${(performance.now() - tMeta).toFixed(0)}ms`);
 
-      // AI background task enqueued, direct fetch call removed in Phase 1 to make uploads instant
+      // Fire-and-forget: Enqueue AI study pack generation in the background.
+      // The HTTP upload response returns immediately; this does NOT block on pipeline completion.
+      // The idempotency check inside /api/generate-study-pack prevents duplicate jobs.
+      if (result.documentId) {
+        console.log(`[UploadTiming] Dispatching /api/generate-study-pack fire-and-forget`);
+        fetch('/api/generate-study-pack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentId: result.documentId,
+            fileUrl: publicUrl,
+            fileType: extension,
+          }),
+        }).then(() => {
+          console.log(`[UploadTiming] /api/generate-study-pack response received`);
+        }).catch((err) => {
+          console.warn('[UploadZone] Fire-and-forget study pack generation failed to dispatch:', err);
+        });
+      }
 
       setProgress(100)
       setStatus("success")
