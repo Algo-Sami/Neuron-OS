@@ -1,5 +1,8 @@
 import { AIProvider, GenerateOptions, CompletionResult, estimateCost } from './provider-interface';
 import { logger } from '@/lib/logger';
+import { classifyAIError } from '../error-classifier';
+import { providerHealth } from '../provider-health';
+import { regulateBudget } from '../budget-guard';
 
 export class OpenRouterProvider implements AIProvider {
   id = 'openrouter' as const;
@@ -29,11 +32,19 @@ export class OpenRouterProvider implements AIProvider {
     }
     messages.push({ role: 'user', content: prompt });
 
+    // Apply budget regulation to prevent 402 token-ceiling errors
+    const budget = regulateBudget(
+      prompt,
+      options?.systemInstruction,
+      options?.maxOutputTokens,
+      4096 // Safe default ceiling for OpenRouter calls
+    );
+
     const payload: Record<string, any> = {
       model: modelName,
       messages,
       temperature: options?.temperature ?? 0.2,
-      max_tokens: options?.maxOutputTokens ?? 4096
+      max_tokens: budget.effectiveMaxOutputTokens
     };
 
     if (options?.responseMimeType === 'application/json') {
@@ -64,7 +75,9 @@ export class OpenRouterProvider implements AIProvider {
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`OpenRouter HTTP error [${response.status}]: ${errorText}`);
+          const err = new Error(`OpenRouter HTTP error [${response.status}]: ${errorText}`);
+          (err as any).status = response.status;
+          throw err;
         }
 
         const data = await response.json();
@@ -82,6 +95,9 @@ export class OpenRouterProvider implements AIProvider {
         const promptTokens = data.usage?.prompt_tokens || Math.ceil(((options?.systemInstruction?.length || 0) + prompt.length) / 4);
         const completionTokens = data.usage?.completion_tokens || Math.ceil(responseText.length / 4);
 
+        // Record health success
+        providerHealth.recordSuccess('openrouter', modelName);
+
         return {
           text: responseText,
           model: modelName,
@@ -97,7 +113,20 @@ export class OpenRouterProvider implements AIProvider {
       } catch (err: any) {
         clearTimeout(timeoutId);
         lastError = err;
-        logger.warn(`[OpenRouterProvider] Attempt ${attempt} failed: ${err.message || String(err)}`);
+
+        // Classify the error
+        const classified = classifyAIError(err, 'openrouter');
+        providerHealth.recordFailure('openrouter', modelName, classified.category, classified.message);
+
+        logger.warn(
+          `[OpenRouterProvider] Attempt ${attempt} failed [Category: ${classified.category}, Retryable: ${classified.retryable}]: ${classified.message}`
+        );
+
+        // If non-retryable (e.g. 402 billing, 401 auth, 404 invalid model, 400 bad request), STOP retries immediately
+        if (!classified.retryable) {
+          logger.warn(`[OpenRouterProvider] Stopping retries immediately due to non-retryable error (Category: ${classified.category}).`);
+          break;
+        }
 
         // Wait before retry (exponential backoff: 1s, 2s, 4s...)
         if (attempt < maxRetries) {
@@ -107,7 +136,7 @@ export class OpenRouterProvider implements AIProvider {
       }
     }
 
-    throw new Error(`OpenRouter query failed after ${maxRetries} attempts. Last error: ${lastError?.message || String(lastError)}`);
+    throw new Error(`OpenRouter query failed after ${attempt} attempt(s). Last error: ${lastError?.message || String(lastError)}`);
   }
 
   async generateStructuredJSON(

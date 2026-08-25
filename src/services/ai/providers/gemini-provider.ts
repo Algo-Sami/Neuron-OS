@@ -1,6 +1,9 @@
 import { AIProvider, GenerateOptions, CompletionResult, estimateCost } from './provider-interface';
 import { getAIClient } from '../gemini';
 import { logger } from '@/lib/logger';
+import { classifyAIError } from '../error-classifier';
+import { providerHealth } from '../provider-health';
+import { regulateBudget } from '../budget-guard';
 
 export class GeminiProvider implements AIProvider {
   id = 'gemini' as const;
@@ -12,6 +15,13 @@ export class GeminiProvider implements AIProvider {
     options?: GenerateOptions
   ): Promise<CompletionResult> {
     try {
+      const budget = regulateBudget(
+        prompt,
+        options?.systemInstruction,
+        options?.maxOutputTokens,
+        8192
+      );
+
       const ai = getAIClient();
       const rawModel = ai.getGenerativeModel({
         model: modelName,
@@ -23,7 +33,7 @@ export class GeminiProvider implements AIProvider {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: options?.temperature ?? 0.2,
-          maxOutputTokens: options?.maxOutputTokens ?? 4096,
+          maxOutputTokens: budget.effectiveMaxOutputTokens,
           responseMimeType,
           responseSchema: options?.responseSchema as any,
         }
@@ -40,6 +50,8 @@ export class GeminiProvider implements AIProvider {
       const promptTokens = Math.ceil(inputChars / 4);
       const completionTokens = Math.ceil(outputChars / 4);
 
+      providerHealth.recordSuccess('gemini', modelName);
+
       return {
         text: responseText,
         model: modelName,
@@ -52,7 +64,9 @@ export class GeminiProvider implements AIProvider {
         }
       };
     } catch (err: any) {
-      logger.error(`[GeminiProvider] generateText failed: ${err.message}`);
+      const classified = classifyAIError(err, 'gemini');
+      providerHealth.recordFailure('gemini', modelName, classified.category, classified.message);
+      logger.error(`[GeminiProvider] generateText failed [Category: ${classified.category}]: ${classified.message}`);
       throw err;
     }
   }

@@ -9,6 +9,8 @@
 import { GenerateOptions, TokenUsage, CompletionResult, AIProvider } from './providers/provider-interface';
 import { GeminiProvider } from './providers/gemini-provider';
 import { OpenRouterProvider } from './providers/openrouter-provider';
+import { classifyAIError } from './error-classifier';
+import { providerHealth } from './provider-health';
 import { logger } from '@/lib/logger';
 
 // Re-export type definitions for backwards-compatibility
@@ -22,6 +24,16 @@ const providers: Record<'gemini' | 'openrouter', AIProvider> = {
   gemini: geminiProvider,
   openrouter: openRouterProvider
 };
+
+/**
+ * Resolves standard model names dynamically from environment or defaults
+ */
+export function getStandardModelName(provider: 'gemini' | 'openrouter'): string {
+  if (provider === 'gemini') {
+    return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  }
+  return process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+}
 
 /**
  * Detects the correct provider matching the specified model name
@@ -44,6 +56,8 @@ export async function executeAICompletion(
   options?: GenerateOptions
 ): Promise<CompletionResult> {
   const primaryProviderId = detectProvider(primaryModel);
+  const geminiFallbackModel = getStandardModelName('gemini');
+  const openrouterFallbackModel = getStandardModelName('openrouter');
   
   // Set up sequential attempt sequence
   const attempts: Array<{ providerId: 'gemini' | 'openrouter'; model: string }> = [
@@ -52,16 +66,25 @@ export async function executeAICompletion(
 
   // Configure fallbacks
   if (primaryProviderId === 'openrouter') {
-    // If OpenRouter fails, attempt failover via Gemini
-    attempts.push({ providerId: 'gemini', model: 'gemini-1.5-flash' });
+    // If OpenRouter fails, attempt failover via Gemini (using currently supported model)
+    attempts.push({ providerId: 'gemini', model: geminiFallbackModel });
   } else {
     // If Gemini fails, attempt failover via OpenRouter
-    attempts.push({ providerId: 'openrouter', model: 'google/gemini-2.5-flash' });
+    attempts.push({ providerId: 'openrouter', model: openrouterFallbackModel });
   }
 
   let lastError: Error | null = null;
 
-  for (const attempt of attempts) {
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    const isFallback = i > 0;
+
+    // Check circuit breaker health
+    if (!providerHealth.isHealthy(attempt.providerId, attempt.model) && attempts.length > 1 && !isFallback) {
+      logger.warn(`[AI Pipeline][Gateway] Skipping primary ${attempt.providerId}/${attempt.model} because it is in unhealthy cooldown.`);
+      continue;
+    }
+
     try {
       logger.info(`[AI Pipeline][Gateway] Routing request to: ${attempt.providerId} (${attempt.model})`);
       
@@ -84,7 +107,18 @@ export async function executeAICompletion(
 
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      logger.warn(`[AI Pipeline][Gateway] Fallback triggered: ${attempt.providerId}/${attempt.model} failed. Error: ${lastError.message}`);
+      const classified = classifyAIError(error, attempt.providerId);
+
+      if (i + 1 < attempts.length) {
+        const nextAttempt = attempts[i + 1];
+        logger.warn(
+          `[AI Fallback] primary=${attempt.providerId}/${attempt.model} error=${classified.statusCode || classified.category} fallback=${nextAttempt.providerId}/${nextAttempt.model} reason=${classified.category}`
+        );
+      } else {
+        logger.error(
+          `[AI Pipeline][Gateway] All configured provider attempts failed. Last error [${classified.category}]: ${lastError.message}`
+        );
+      }
     }
   }
 

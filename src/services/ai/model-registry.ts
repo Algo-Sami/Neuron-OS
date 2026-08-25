@@ -67,11 +67,11 @@ export const MODEL_REGISTRY: Record<SkillType, ModelConfig> = {
   },
   ocr: {
     provider: 'gemini',
-    modelName: 'gemini-1.5-flash'
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   embedding: {
     provider: 'gemini',
-    modelName: 'text-embedding-004'
+    modelName: 'gemini-embedding-001'
   }
 };
 

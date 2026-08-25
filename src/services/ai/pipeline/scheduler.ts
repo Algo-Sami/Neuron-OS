@@ -217,6 +217,7 @@ export class AIJobScheduler {
         const errMsg = extRes.errorMessage || 'Text extraction returned an empty result. Processing stopped before chunk generation.';
         this.logDisk('extraction', `Extraction Failed`, 'ERROR');
         this.logDisk('extraction', `Reason: ${errMsg}`, 'ERROR');
+        this.logDisk('extraction', `[RetryDecision] stage=extraction error="${errMsg}" retryable=true action=retry_with_backoff`, 'WARN');
         this.updateStage('extraction', {
           status: 'failed',
           endTime: new Date().toISOString(),
@@ -234,6 +235,7 @@ export class AIJobScheduler {
       // Phase 8: Validate extraction output
       PipelineValidator.validateExtraction(extRes.text);
 
+      this.logDisk('extraction', `[StageCheckpoint] document=${this.documentId} stage=extraction status=completed`, 'INFO');
       this.logDisk('extraction', `PDF Stored — file downloaded and validated`, 'INFO');
       this.logDisk('extraction', `Extraction Completed`, 'INFO');
       this.logDisk('extraction', `Characters Extracted: ${extRes.charCount || 0}`, 'INFO');
@@ -260,10 +262,12 @@ export class AIJobScheduler {
         throw new Error(`Failed to check existing chunks: ${chunkListErr.message}`);
       }
 
-      const hasChunks      = existingChunks && existingChunks.length > 0;
+      const hasChunks        = existingChunks && existingChunks.length > 0;
       const shouldRegenerate = !!this.options.forceRun;
 
       if (hasChunks && !shouldRegenerate) {
+        this.logDisk('chunking', `[Idempotency] stage=chunking existing=true action=reuse`, 'INFO');
+        this.logDisk('chunking', `[StageCheckpoint] document=${this.documentId} stage=chunking status=completed`, 'INFO');
         this.logDisk('chunking', `Document already chunked (${existingChunks.length} chunks found). Skipping — idempotency.`, 'INFO');
         this.updateStage('chunking', { status: 'skipped', endTime: new Date().toISOString() });
         // Jump straight to verification with the existing chunks
@@ -381,6 +385,7 @@ export class AIJobScheduler {
           throw new Error(`Chunk Generation Failed — database insert error: ${dbInsertErr.message}`);
         }
 
+        this.logDisk('chunking', `[StageCheckpoint] document=${this.documentId} stage=chunking status=completed`, 'INFO');
         this.logDisk('chunking', `Chunks saved successfully.`, 'INFO');
         this.updateStage('chunking', {
           status: 'completed',
@@ -441,6 +446,8 @@ export class AIJobScheduler {
         return;
       }
 
+      this.logDisk('verification', `[StageCheckpoint] document=${this.documentId} stage=verification status=completed`, 'INFO');
+
       // ── 5. Embedding Generation Stage (Phase 2) ──────────────────────────
       this.logDisk('verification', 'Ingestion Verification Passed.', 'INFO');
       
@@ -490,6 +497,11 @@ export class AIJobScheduler {
         await this.saveProgress('Failed', errMsg);
         return;
       }
+
+      if (embResult.skipped) {
+        this.logDisk('embeddings', `[Idempotency] stage=embeddings existing=true action=reuse`, 'INFO');
+      }
+      this.logDisk('embeddings', `[StageCheckpoint] document=${this.documentId} stage=embeddings status=completed`, 'INFO');
 
       // Phase 8: Validate embedding output
       if (embResult.success && !embResult.skipped) {
@@ -551,14 +563,7 @@ export class AIJobScheduler {
         return;
       }
 
-      this.logDisk('knowledgeVerify', 'Embeddings Verified', 'INFO');
-      this.logDisk('knowledgeVerify', 'Knowledge Base Ready', 'INFO');
-      this.updateStage('knowledgeVerify', {
-        status: 'completed',
-        endTime: new Date().toISOString(),
-        durationMs: Date.now() - embeddingStartMs
-      });
-
+      this.logDisk('knowledgeVerify', `[StageCheckpoint] document=${this.documentId} stage=knowledgeVerify status=completed`, 'INFO');
       this.logDisk('knowledgeVerify', 'Embeddings Verified', 'INFO');
       this.logDisk('knowledgeVerify', 'Knowledge Base Ready', 'INFO');
       this.updateStage('knowledgeVerify', {
@@ -570,6 +575,7 @@ export class AIJobScheduler {
       // ── 7. Complete Knowledge Ready ─────────────────────────────────────────
       await this.supabase.from('document_knowledge').update({
         current_processing_stage: 'Knowledge Ready',
+        embedding_status: 'completed',
         updated_at: new Date().toISOString()
       }).eq('document_id', this.documentId);
 
@@ -577,6 +583,7 @@ export class AIJobScheduler {
       const subjectName       = (doc.subjects as any)?.name || 'General';
 
       // ── 8. Summary Generation ──────────────────────────────────────────────
+      this.logDisk('summaryGen', `[StageResume] document=${this.documentId} resume_from=summaryGen`, 'INFO');
       this.logDisk('summaryGen', 'Summary Generation Started', 'INFO');
       this.updateStage('summaryGen', { status: 'processing', startTime: new Date().toISOString() });
 
@@ -600,6 +607,8 @@ export class AIJobScheduler {
         const errMsg = summaryResult.errorMessage || 'Summary generation returned an empty result.';
         this.logDisk('summaryGen', 'Summary Generation Failed', 'ERROR');
         this.logDisk('summaryGen', `Failure Details — document: ${this.documentId}, user: ${this.userId}, stage: summaryGen, duration: ${summaryDurationMs}ms, reason: ${errMsg}`, 'ERROR');
+        this.logDisk('summaryGen', `[RetryDecision] stage=summaryGen error="${errMsg}" retryable=true action=retry_with_backoff`, 'WARN');
+        
         this.updateStage('summaryGen', {
           status: 'failed',
           endTime: new Date().toISOString(),
@@ -607,8 +616,10 @@ export class AIJobScheduler {
           errorMessage: errMsg
         });
 
+        // Preserve knowledge base readiness (partial success)
         await this.supabase.from('document_knowledge').update({
           current_processing_stage: 'Summary Failed',
+          embedding_status: 'completed',
           updated_at: new Date().toISOString()
         }).eq('document_id', this.documentId);
 
@@ -616,6 +627,10 @@ export class AIJobScheduler {
         return;
       }
 
+      if (summaryResult.cached) {
+        this.logDisk('summaryGen', `[Idempotency] stage=summaryGen existing=true action=reuse`, 'INFO');
+      }
+      this.logDisk('summaryGen', `[StageCheckpoint] document=${this.documentId} stage=summaryGen status=completed`, 'INFO');
       this.logDisk('summaryGen', 'Summary Generated Successfully', 'INFO');
       this.logDisk('summaryGen', 'Summary Saved', 'INFO');
       this.updateStage('summaryGen', {
@@ -626,6 +641,7 @@ export class AIJobScheduler {
 
       await this.supabase.from('document_knowledge').update({
         current_processing_stage: 'Summary Generated',
+        embedding_status: 'completed',
         updated_at: new Date().toISOString()
       }).eq('document_id', this.documentId);
 

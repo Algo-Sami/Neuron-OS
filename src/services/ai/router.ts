@@ -278,9 +278,9 @@ export async function routeAIRequest(params: RouterParams): Promise<RouterRespon
   // Downgrade fallback rules
   if (preCheck.shouldDowngrade) {
     if (modelConfig.provider === 'gemini') {
-      selectedModel = 'gemini-1.5-flash';
+      selectedModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     } else {
-      selectedModel = 'google/gemini-2.5-flash';
+      selectedModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
     }
   }
 

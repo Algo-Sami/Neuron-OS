@@ -1,11 +1,10 @@
-import { NextRequest, NextResponse, after } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { createClient as createAnonClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
-import { AIJobScheduler } from '@/services/ai/pipeline/scheduler';
 import { UserPreferences } from '@/lib/preferences';
 import { logger } from '@/lib/logger';
 import { JobRecoveryService } from '@/services/ai/pipeline/job-recovery-service';
+import { enqueueStudyPackJob } from '@/lib/queue/study-pack-queue';
 import * as crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
@@ -205,47 +204,26 @@ export async function POST(request: NextRequest) {
     }
 
     if (!shouldDispatch) {
-      return NextResponse.json({ success: true, message: 'Study pack queued', taskId }, { status: 200 });
+      return NextResponse.json({ success: true, jobId: null, taskId, status: 'queued' }, { status: 200 });
     }
 
-    // Snapshot session tokens for background execution
-    const accessToken = session.access_token;
-    const refreshToken = session.refresh_token;
+    // ── Phase 1: Enqueue via BullMQ (replaces setImmediate) ─────────────────
+    // The worker independently processes the job — this route returns immediately.
+    const { jobId, deduplicated } = await enqueueStudyPackJob({
+      jobId: taskId, // stable identity key
+      taskId,
+      userId,
+      documentId,
+      fileUrl,
+      fileType,
+      force: !!force,
+      preferences,
+    });
 
-    console.log(`[StudyPackTiming] Request validated & task ${taskId} queued. Dispatching scheduler in background.`);
     const reqDuration = Date.now() - startTime;
-    console.log(`[StudyPackTiming] HTTP response ready in ${reqDuration}ms`);
+    logger.info(`[generate-study-pack] Task ${taskId} enqueued as BullMQ job ${jobId} in ${reqDuration}ms (deduplicated=${deduplicated})`);
 
-    // Background scheduler worker (detached from HTTP response lifecycle)
-    const runScheduler = async () => {
-      const schedulerStart = Date.now();
-      console.log(`[StudyPackTiming] Background scheduler execution STARTED for document ${documentId}`);
-      try {
-        const anonSupabase = createAnonClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        );
-        await anonSupabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken
-        });
-
-        const scheduler = new AIJobScheduler(anonSupabase, documentId, userId, taskId, {
-          forceRun: !!force,
-          preferences,
-        });
-
-        await scheduler.run(fileUrl, fileType);
-        console.log(`[StudyPackTiming] Background scheduler execution COMPLETED in ${Date.now() - schedulerStart}ms`);
-      } catch (err) {
-        logger.error('[generate-study-pack] Unhandled scheduler orchestrator error:', err);
-      }
-    };
-
-    // Use setImmediate to execute on next event loop tick after HTTP response is flushed
-    setImmediate(runScheduler);
-
-    return NextResponse.json({ success: true, message: 'Study pack queued', taskId }, { status: 200 });
+    return NextResponse.json({ success: true, jobId, taskId, status: 'queued' }, { status: 200 });
 
   } catch (err: unknown) {
     logger.error('[generate-study-pack] Route handler crashed:', err);
