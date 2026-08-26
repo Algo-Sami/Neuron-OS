@@ -166,10 +166,10 @@ LECTURE CONTENT:
     temperature: 0.3,
     maxOutputTokens: 8192,
     validate: (content: string) => {
-      const hasSumMarkers = content.includes('---SUM_START---') && content.includes('---SUM_END---');
-      const hasPointsMarkers = content.includes('---POINTS_START---') && content.includes('---POINTS_END---');
-      if (!hasSumMarkers) return { valid: false, error: 'Response is missing required ---SUM_START--- / ---SUM_END--- markers.' };
-      if (!hasPointsMarkers) return { valid: false, error: 'Response is missing required ---POINTS_START--- / ---POINTS_END--- markers.' };
+      const clean = content.trim();
+      if (!clean || clean.length < 150) {
+        return { valid: false, error: 'Summary output is too short or empty (minimum 150 characters required).' };
+      }
       return { valid: true };
     }
   },

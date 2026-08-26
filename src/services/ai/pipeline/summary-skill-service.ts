@@ -164,8 +164,8 @@ export class SummarySkillService {
       // ── Step 5: Parse and Validate Output ──
       const parsed = SummarySkillService.parseMarkers(skillResult.generatedContent);
 
-      if (!parsed.summaryText) {
-        throw new Error('AI response did not contain valid ---SUM_START--- / ---SUM_END--- markers.');
+      if (!parsed.summaryText || parsed.summaryText.length < 50) {
+        throw new Error('AI response did not contain sufficient summary content.');
       }
 
       // Phase 8 validation: Summary quality check
@@ -300,12 +300,27 @@ export class SummarySkillService {
   }
 
   private static parseMarkers(text: string): { summaryText: string; keyPoints: string[] } {
-    const sumMatch = text.match(/---SUM_START---([\s\S]*?)---SUM_END---/);
-    const pointsMatch = text.match(/---POINTS_START---([\s\S]*?)---POINTS_END---/);
-
-    const summaryText = sumMatch ? sumMatch[1].trim() : '';
-
+    let summaryText = '';
     let keyPoints: string[] = [];
+
+    const sumMatch = text.match(/---SUM_START---([\s\S]*?)---SUM_END---/i);
+    const pointsMatch = text.match(/---POINTS_START---([\s\S]*?)---POINTS_END---/i);
+
+    if (sumMatch) {
+      summaryText = sumMatch[1].trim();
+    } else if (pointsMatch && pointsMatch.index !== undefined) {
+      // If sum markers are omitted but points markers exist, take everything before points markers
+      summaryText = text.substring(0, pointsMatch.index).replace(/---SUM_START---/gi, '').trim();
+    } else {
+      // If neither marker is present, clean any stray delimiter tags and use the full output
+      summaryText = text
+        .replace(/---SUM_START---/gi, '')
+        .replace(/---SUM_END---/gi, '')
+        .replace(/---POINTS_START---/gi, '')
+        .replace(/---POINTS_END---/gi, '')
+        .trim();
+    }
+
     if (pointsMatch) {
       try {
         keyPoints = JSON.parse(pointsMatch[1].trim());
@@ -314,6 +329,34 @@ export class SummarySkillService {
           .split('\n')
           .map((line: string) => line.replace(/^[-\s*"'\[\],]+|[\]"',]+$/g, '').trim())
           .filter(Boolean);
+      }
+    }
+
+    // Fallback: If keyPoints is empty or has fewer than 3 items, extract key points from headings or bullets
+    if (!keyPoints || keyPoints.length < 3) {
+      const headingMatches = summaryText.match(/^#{1,3}\s+(.+)$/gm);
+      if (headingMatches && headingMatches.length >= 3) {
+        keyPoints = headingMatches
+          .map(h => h.replace(/^#{1,3}\s+/, '').trim())
+          .filter(h => !h.toLowerCase().includes('summary') && !h.toLowerCase().includes('introduction') && h.length > 3)
+          .slice(0, 8);
+      }
+
+      if (keyPoints.length < 3) {
+        const bulletMatches = summaryText.match(/^[\*\-]\s+(.+)$/gm);
+        if (bulletMatches && bulletMatches.length >= 3) {
+          keyPoints = bulletMatches
+            .map(b => b.replace(/^[\*\-]\s+/, '').trim())
+            .slice(0, 8);
+        }
+      }
+
+      if (keyPoints.length === 0) {
+        const sentences = summaryText
+          .split(/\.\s+/)
+          .map(s => s.replace(/[#*`]/g, '').trim())
+          .filter(s => s.length > 20 && s.length < 150);
+        keyPoints = sentences.slice(0, 5);
       }
     }
 
