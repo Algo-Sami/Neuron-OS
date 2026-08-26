@@ -2,6 +2,7 @@ import { routeAIRequest } from '../router';
 import { ContextPackage } from './context-builder';
 import { logger } from '@/lib/logger';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Types and Standard Response Contract ─────────────────────────────────────
 
@@ -764,7 +765,7 @@ ${generatedContent}
     try {
       const ts = new Date().toISOString();
       const formatted = `[${ts}] [ResponseEngine] [${skillId}] (${level}) ${message}\n`;
-      fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', formatted);
+      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), formatted);
     } catch { /* ignore */ }
   }
 }

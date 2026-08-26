@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getEmbedding } from './embeddings';
 import { logger } from '@/lib/logger';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ function logRetrievalToDisk(data: {
   try {
     const ts = new Date().toISOString();
     const logMsg = `[${ts}] [RAG Retrieval] Question: "${data.question}" | Docs: ${data.searchedDocCount} | Evaluated: ${data.chunksEvaluatedCount} | Selected: ${data.selectedCount} | Score: ${data.confidenceScore} (${data.confidenceLabel}) | Duration: ${data.durationMs}ms | All Scores: [${data.scores.join(', ')}]\n`;
-    fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', logMsg);
+    fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), logMsg);
   } catch { /* ignore */ }
 }
 

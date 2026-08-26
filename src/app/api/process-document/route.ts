@@ -9,6 +9,7 @@ import { logger } from '@/lib/logger';
 import { getEmbedding, getEmbeddings } from '@/services/ai/embeddings';
 import { routeAIRequest } from '@/services/ai/router';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // Maximum retries for extraction
 const MAX_RETRIES = 2;
@@ -16,7 +17,7 @@ const MAX_RETRIES = 2;
 // Disk logger for background diagnostics
 function logToDisk(message: string, error?: unknown) {
   try {
-    const logPath = 'd:/FYP Project/neuron/background_logs.txt';
+    const logPath = path.join(process.cwd(), 'background_logs.txt');
     const timestamp = new Date().toISOString();
     let logMsg = `[${timestamp}] ${message}\n`;
     if (error) {
@@ -27,8 +28,8 @@ function logToDisk(message: string, error?: unknown) {
       }
     }
     fs.appendFileSync(logPath, logMsg);
-  } catch (e) {
-    console.error("Failed to write log to disk", e);
+  } catch {
+    // silent — avoid crashing on container deployments
   }
 }
 

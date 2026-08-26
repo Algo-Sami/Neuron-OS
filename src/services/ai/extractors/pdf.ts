@@ -7,9 +7,9 @@ import { pathToFileURL } from 'url';
 
 function logToDisk(msg: string) {
   try {
-    fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', `[PDF_EXTRACTOR] ${msg}\n`);
-  } catch (e) {
-    console.error(e);
+    fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), `[PDF_EXTRACTOR] ${msg}\n`);
+  } catch {
+    // silent — avoid crashing or logging ENOENT on container deployments
   }
 }
 

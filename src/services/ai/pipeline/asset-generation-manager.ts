@@ -23,6 +23,7 @@ import { AssetType, AssetStatus, KnowledgeAsset, KnowledgeAssetRegistry } from '
 import { isVersionOutdated, getEffectiveVersion, formatVersionLog } from './ai-version-manifest';
 import { JobRecoveryService } from './job-recovery-service';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Dependency Graph Definition ────────────────────────────────────────────────
 
@@ -686,7 +687,7 @@ export class AssetGenerationManager {
     try {
       const ts = new Date().toISOString();
       const line = `[${ts}] [AssetGenerationManager] (${level}) ${message}\n`;
-      fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', line);
+      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), line);
     } catch { /* ignore */ }
   }
 }

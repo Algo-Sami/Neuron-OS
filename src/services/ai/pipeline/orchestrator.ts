@@ -2,6 +2,7 @@ import { ContextPackage } from './context-builder';
 import { UniversalAIResponseEngine, SkillResponseContract } from './response-engine';
 import { logger } from '@/lib/logger';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -190,7 +191,7 @@ export class AISkillOrchestrator {
       const ts = new Date().toISOString();
       const skillsStr = plan.steps.map(s => s.skillId).join(' -> ');
       const logMsg = `[${ts}] [Orchestrator] Query: "${query}" | Intent: ${plan.intent} | Goal: ${plan.userGoal} | Plan: [${skillsStr}] | Reasoning: ${plan.reasoningSummary} | Duration: ${durationMs}ms\n`;
-      fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', logMsg);
+      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), logMsg);
     } catch { /* ignore */ }
   }
 }

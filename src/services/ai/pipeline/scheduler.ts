@@ -8,6 +8,7 @@ import { UserPreferences } from '@/lib/preferences';
 import { logger } from '@/lib/logger';
 import { chunkText } from '../chunker';
 import * as fs from 'fs';
+import * as path from 'path';
 import { SummarySkillService } from './summary-skill-service';
 import { generateSummaryPDF } from '@/services/pdf/study-pack-pdf';
 import { FolderSyncService } from './folder-sync-service';
@@ -81,7 +82,7 @@ export class AIJobScheduler {
     const ts = new Date().toISOString();
     const formatted = `[${ts}] [Scheduler] [${this.documentId.substring(0, 8)}] [${stage}] (${level}) ${message}\n`;
     try {
-      fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', formatted);
+      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), formatted);
     } catch { /* ignore */ }
     logger.info(`[Scheduler][${stage}][${level}] ${message}`);
 

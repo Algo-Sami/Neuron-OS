@@ -15,6 +15,7 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ function logToDisk(context: string, message: string, level: 'INFO' | 'WARN' | 'E
   try {
     const ts = new Date().toISOString();
     fs.appendFileSync(
-      'd:/FYP Project/neuron/background_logs.txt',
+      path.join(process.cwd(), 'background_logs.txt'),
       `[${ts}] [BG-AI] [${level}] [${context}] ${message}\n`
     );
   } catch { /* silent — never crash on log failure */ }

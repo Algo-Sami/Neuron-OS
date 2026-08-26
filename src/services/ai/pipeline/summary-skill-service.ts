@@ -17,7 +17,6 @@ import { SearchResult } from '../search';
 import { PipelineValidator } from './context-validator';
 import { SlidingWindowSummarizer } from './sliding-window-summarizer';
 import { CURRENT_PROMPT_VERSION } from './ai-version-manifest';
-import * as fs from 'fs';
 
 export type SummaryMode =
   | 'beginner'
@@ -107,7 +106,6 @@ export class SummarySkillService {
       PipelineValidator.validateChunking(rawChunks);
 
       logger.info(`[DEBUG][SummarySkill] Number of chunks loaded: ${rawChunks.length}`);
-      fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', `[DEBUG][SummarySkill] Number of chunks loaded: ${rawChunks.length}\n`);
 
       // ── Step 3: Context Building using sliding window or hierarchical summarization ──
       const summaryQuery = `Summarize all key topics, concepts, definitions, and learning objectives in this document.`;

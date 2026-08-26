@@ -5,6 +5,7 @@ import { ContextBudgetManager } from './context-budget-manager';
 import { ContextCompressor } from './context-compressor';
 import { PipelineValidator } from './context-validator';
 import * as fs from 'fs';
+import * as path from 'path';
 
 export interface ContextSource {
   documentId: string;
@@ -167,7 +168,7 @@ export class ContextBuilder {
       const ts = new Date().toISOString();
       const docId = pkg.sources[0]?.documentId || 'unknown-doc';
       const logMsg = `[${ts}] [ContextBuilder] Document ID: ${docId} | Chunks Received: ${received} | Chunks Selected: ${selected} | Chunks Skipped: ${skipped} | Est Tokens: ${pkg.estimatedTokens}/${report.maxTokens} | Truncated: ${pkg.isTruncated} | Duration: ${durationMs}ms\n`;
-      fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', logMsg);
+      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), logMsg);
     } catch { /* ignore */ }
   }
 }

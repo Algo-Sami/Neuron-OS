@@ -23,6 +23,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
 import * as fs from 'fs';
+import * as path from 'path';
 import { getEffectiveVersion } from './ai-version-manifest';
 
 // ── Asset Types ───────────────────────────────────────────────────────────────
@@ -630,7 +631,7 @@ export class KnowledgeAssetRegistry {
     try {
       const ts = new Date().toISOString();
       const line = `[${ts}] [KnowledgeAssetRegistry] (${level}) ${message}\n`;
-      fs.appendFileSync('d:/FYP Project/neuron/background_logs.txt', line);
+      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), line);
     } catch { /* ignore */ }
   }
 }
