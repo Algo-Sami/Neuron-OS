@@ -596,19 +596,6 @@ function TakeawayCard({ text, index }: { text: string; index: number }) {
   );
 }
 
-function CalloutCard({ text, type }: { text: string; type: 'info' | 'success' | 'warning' }) {
-  const palette = {
-    info:    { bg: C.infoBg,    border: C.accent,   textColor: C.blue },
-    success: { bg: C.successBg, border: C.success,  textColor: '#065f46' },
-    warning: { bg: C.warningBg, border: C.warning,  textColor: '#92400e' },
-  }[type];
-  return (
-    <View style={[S.calloutCard, { backgroundColor: palette.bg, borderLeftColor: palette.border }]}>
-      <Text style={[S.calloutText, { color: palette.textColor }]}>{text}</Text>
-    </View>
-  );
-}
-
 // ── Structured Summary (when AI returns typed object) ─────────────────────────
 
 function StructuredSummaryContent({ summary }: { summary: StudySummary }) {
@@ -643,27 +630,22 @@ function StructuredSummaryContent({ summary }: { summary: StudySummary }) {
 // and plain paragraphs. No raw Markdown characters appear in the PDF output.
 
 // InlineText: renders a line of text with **bold** / *italic* / ***both*** support
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function InlineText({ raw, baseStyle }: { raw: string; baseStyle: any }): React.ReactElement {
   const spans = parseInlineSpans(raw);
 
   // No inline markers found — render as plain text
   if (spans.length === 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return <Text style={baseStyle as any}>{raw}</Text>;
+    return <Text style={baseStyle}>{raw}</Text>;
   }
 
   // Single plain span — no nesting needed
   if (spans.length === 1 && !spans[0].bold && !spans[0].italic) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return <Text style={baseStyle as any}>{spans[0].text}</Text>;
+    return <Text style={baseStyle}>{spans[0].text}</Text>;
   }
 
   // Mixed spans — wrap in a parent Text and nest styled child Text nodes
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    <Text style={baseStyle as any}>
+    <Text style={baseStyle}>
       {spans.map((span, i) => {
         if (!span.bold && !span.italic) {
           return <Text key={i}>{span.text}</Text>;
@@ -862,7 +844,6 @@ export async function generateSummaryPDF(
     readingMinutes = Math.max(1, Math.ceil(wordCount / 200));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const uint8 = await renderToBuffer(
     <SummaryDocument
       summary={summary}

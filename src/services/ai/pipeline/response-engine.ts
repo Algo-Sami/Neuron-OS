@@ -1,5 +1,6 @@
 import { routeAIRequest } from '../router';
 import { ContextPackage } from './context-builder';
+import { PipelineValidator } from './context-validator';
 import { logger } from '@/lib/logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -591,7 +592,7 @@ export class UniversalAIResponseEngine {
 
       // Step 2 & Hallucination Prevention check:
       // If retrieval confidence is low (< 0.50), configure prompt instructions to state uncertainty
-      let finalPromptTemplate = skill.promptTemplate;
+      const finalPromptTemplate = skill.promptTemplate;
       let finalSystemInstruction = skill.systemInstruction || 'You are an academic assistant.';
 
       if (context.overallConfidenceScore < 0.50) {
@@ -631,7 +632,6 @@ export class UniversalAIResponseEngine {
       };
 
       // Phase 8: Validate built prompt
-      const { PipelineValidator } = require('./context-validator');
       PipelineValidator.validatePrompt(promptText);
 
       const response = await routeAIRequest(routerParams);

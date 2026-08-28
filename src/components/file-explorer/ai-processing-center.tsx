@@ -197,7 +197,7 @@ function getUIStages(task: BackgroundTask): UIStageState[] {
   }
 
   let activeIndex = PIPELINE_STATUSES.findIndex(s => s.key === normalizedStatus);
-  let isFailed = normalizedStatus === "Failed";
+  const isFailed = normalizedStatus === "Failed";
   let failedKey = "";
 
   if (isFailed) {

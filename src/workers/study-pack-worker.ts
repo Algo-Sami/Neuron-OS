@@ -43,7 +43,7 @@ import { Worker, UnrecoverableError, type Job, type WorkerOptions } from 'bullmq
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createDedicatedRedisConnection, closeRedisConnection } from '@/lib/queue/redis';
 import { QUEUE_NAME, type StudyPackJobPayload, type StudyPackJobResult, classifyError, NonRetryableError } from '@/lib/queue/types';
-import { closeStudyPackQueue } from '@/lib/queue/study-pack-queue';
+import { enqueueStudyPackJob, closeStudyPackQueue } from '@/lib/queue/study-pack-queue';
 import { AIJobScheduler } from '@/services/ai/pipeline/scheduler';
 import { JobRecoveryService } from '@/services/ai/pipeline/job-recovery-service';
 import { logger } from '@/lib/logger';
@@ -278,7 +278,98 @@ worker.on('error', (err) => {
   logger.error('[Worker] Worker-level error:', err);
 });
 
-// ─── Startup ──────────────────────────────────────────────────────────────────
+// ─── Startup Sweep & Watchdog ──────────────────────────────────────────────────
+
+let watchdogTimer: NodeJS.Timeout | null = null;
+
+async function runStartupSweep() {
+  try {
+    const supabase = createWorkerSupabaseClient();
+    logger.info('[Worker] Running startup database reconciliation sweep...');
+
+    // 1. Recover any stale locked tasks
+    const { recoveredCount } = await JobRecoveryService.recoverStaleJobs(supabase);
+    if (recoveredCount > 0) {
+      logger.info(`[Worker] Recovered ${recoveredCount} stale tasks during startup sweep.`);
+    }
+
+    // 2. Query pending or queued study-pack tasks that are not locked
+    const { data: tasks, error } = await supabase
+      .from('background_tasks')
+      .select('id, user_id, document_id, status, locked_by')
+      .eq('task_type', 'study_pack')
+      .in('status', ['pending', 'Queued', 'queued'])
+      .is('locked_by', null);
+
+    if (error) {
+      logger.error('[Worker] Error during startup task reconciliation:', error);
+      return;
+    }
+
+    if (!tasks || tasks.length === 0) {
+      logger.info('[Worker] Startup sweep: 0 orphaned tasks found. Queue is up to date.');
+      return;
+    }
+
+    logger.info(`[Worker] Startup sweep: found ${tasks.length} pending/queued tasks. Reconciling with BullMQ...`);
+
+    let enqueuedCount = 0;
+    for (const task of tasks) {
+      // Fetch document details
+      const { data: doc } = await supabase
+        .from('documents')
+        .select('id, file_url, file_type, deleted_at, subject_id')
+        .eq('id', task.document_id)
+        .maybeSingle();
+
+      if (!doc || doc.deleted_at !== null || !doc.file_url || !doc.file_type || !doc.subject_id) {
+        continue;
+      }
+
+      // Ensure status is Queued in DB
+      if (task.status === 'pending') {
+        await supabase
+          .from('background_tasks')
+          .update({ status: 'Queued', updated_at: new Date().toISOString() })
+          .eq('id', task.id);
+      }
+
+      // Enqueue to BullMQ
+      await enqueueStudyPackJob({
+        jobId: task.id,
+        taskId: task.id,
+        userId: task.user_id,
+        documentId: task.document_id,
+        fileUrl: doc.file_url,
+        fileType: doc.file_type,
+        force: false,
+      });
+      enqueuedCount++;
+    }
+
+    logger.info(`[Worker] Startup sweep completed: ${enqueuedCount} tasks verified/enqueued to BullMQ.`);
+  } catch (sweepErr) {
+    logger.error('[Worker] Exception during startup sweep:', sweepErr);
+  }
+}
+
+function startPeriodicWatchdog() {
+  const WATCHDOG_INTERVAL_MS = 60_000; // Run every 60 seconds
+  watchdogTimer = setInterval(async () => {
+    try {
+      const supabase = createWorkerSupabaseClient();
+      await JobRecoveryService.recoverStaleJobs(supabase);
+    } catch (err) {
+      logger.warn('[Worker] Periodic watchdog error:', err);
+    }
+  }, WATCHDOG_INTERVAL_MS);
+
+  if (watchdogTimer.unref) {
+    watchdogTimer.unref();
+  }
+}
+
+// ─── Startup Execution ────────────────────────────────────────────────────────
 
 logEvent('worker_started', undefined, undefined, {
   workerId: WORKER_INSTANCE_ID,
@@ -286,6 +377,10 @@ logEvent('worker_started', undefined, undefined, {
   queue: QUEUE_NAME,
   nodeVersion: process.version,
   pid: process.pid,
+});
+
+runStartupSweep().finally(() => {
+  startPeriodicWatchdog();
 });
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
@@ -297,6 +392,11 @@ async function gracefulShutdown(signal: string) {
   isShuttingDown = true;
 
   logEvent('worker_shutdown_initiated', undefined, undefined, { signal });
+
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
 
   try {
     // Stop accepting new jobs
@@ -329,3 +429,4 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   logger.error('[Worker] Unhandled rejection:', reason);
 });
+

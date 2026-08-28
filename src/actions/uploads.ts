@@ -4,7 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { awardXP } from '@/services/gamification/rewards'
 import { classifyFilename, normalizeSubjectName } from '@/services/upload-routing'
-import { createFolderAction, scaffoldSubjectFoldersAction } from '@/actions/folders'
+import { scaffoldSubjectFoldersAction } from '@/actions/folders'
+import { dispatchStudyPackGeneration } from '@/services/ai/pipeline/study-pack-dispatcher'
 
 export async function saveUploadMetadata({
   fileName,
@@ -212,6 +213,15 @@ export async function saveUploadMetadata({
     }
   }
 
+  // 3b. Scaffold root folders (including "AI Generated") immediately
+  if (resolvedSubjectId) {
+    try {
+      await scaffoldSubjectFoldersAction(resolvedSubjectId);
+    } catch (scaffoldErr) {
+      console.warn('[Upload Routing] Subject scaffolding warning (non-fatal):', scaffoldErr);
+    }
+  }
+
   // 4. Insert into uploads audit table
   const { data: uploadResult, error: uploadError } = await supabase
     .from('uploads')
@@ -255,42 +265,21 @@ export async function saveUploadMetadata({
     throw new Error(`Failed to create document: ${docError.message}`)
   }
 
-  // 6. Log a background task record (task_type: 'study_pack' aligns with AIProcessingCenter
-  //    and the idempotency check inside /api/generate-study-pack).
-  //    Non-throwing: a failure here must never abort a successful upload.
-  //    After Phase 2B-2, the unique constraint on (user_id, document_id, task_type)
-  //    may reject this insert if a concurrent request already created the same task.
-  //    That is a benign race condition — the /api/generate-study-pack route will find
-  //    the existing pending task and transition it to Queued before dispatching.
+  // 6. Automatically dispatch background study pack generation to BullMQ queue
+  //    Direct server-side dispatch ensures the Railway worker immediately receives the task.
   try {
-    const { error: taskError } = await supabase
-      .from('background_tasks')
-      .insert({
-        user_id: user.id,
-        document_id: docResult.id,
-        task_type: 'study_pack',
-        status: 'pending'
-      });
-    if (taskError) {
-      // PostgreSQL unique_violation — another concurrent request already created
-      // the same logical task. This is expected and harmless; the dispatcher will
-      // pick up the existing record.
-      if (taskError.code === '23505') {
-        console.info(
-          `[Upload Routing] background_tasks unique conflict (23505) for document ${docResult.id} — ` +
-          'a concurrent request already registered this task. Upload continues normally.'
-        );
-      } else {
-        // Unexpected database error — log clearly but do not throw.
-        console.warn(
-          `[Upload Routing] Unexpected error creating background task record for document ${docResult.id}: ` +
-          `${taskError.message} (code: ${taskError.code ?? 'unknown'})`
-        );
-      }
-    }
+    const dispatchRes = await dispatchStudyPackGeneration({
+      supabase,
+      userId: user.id,
+      documentId: docResult.id,
+      fileUrl,
+      fileType,
+      force: false,
+    });
+    console.log(`[Upload Routing] Auto-dispatched study pack generation: status=${dispatchRes.status}, jobId=${dispatchRes.jobId}`);
   } catch (err) {
-    // Structural/network-level exception — log but do not abort the upload.
-    console.warn('[Upload Routing] Exception while creating background task record:', err);
+    // Non-throwing: a redis/queue glitch must never abort a successful upload
+    console.warn('[Upload Routing] Exception while auto-dispatching background study pack task:', err);
   }
 
   // Award XP for uploading study materials (non-blocking)

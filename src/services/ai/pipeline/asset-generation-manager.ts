@@ -19,7 +19,7 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
-import { AssetType, AssetStatus, KnowledgeAsset, KnowledgeAssetRegistry } from './knowledge-asset-registry';
+import { AssetType, KnowledgeAsset, KnowledgeAssetRegistry } from './knowledge-asset-registry';
 import { isVersionOutdated, getEffectiveVersion, formatVersionLog } from './ai-version-manifest';
 import { JobRecoveryService } from './job-recovery-service';
 import * as fs from 'fs';

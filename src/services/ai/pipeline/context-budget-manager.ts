@@ -1,5 +1,4 @@
 import { countTokens } from './tokenizer';
-import { logger } from '@/lib/logger';
 
 export interface BudgetReport {
   maxTokens: number;

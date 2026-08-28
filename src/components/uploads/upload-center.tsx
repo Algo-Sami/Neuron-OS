@@ -280,21 +280,23 @@ function UploadArea({
       if (result?.success && result?.documentId) {
         const classification = classifyFile(file.name);
 
-        const fireStudyPack = () => {
-          console.log(`[UploadTiming] [UploadCenter] Dispatching /api/generate-study-pack fire-and-forget`);
-          fetch("/api/generate-study-pack", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              documentId: result.documentId,
-              fileUrl: publicUrl,
-              fileType: ext,
-            }),
-          }).then(() => {
+        const fireStudyPack = async () => {
+          console.log(`[UploadTiming] [UploadCenter] Dispatching /api/generate-study-pack`);
+          try {
+            await fetch("/api/generate-study-pack", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              keepalive: true,
+              body: JSON.stringify({
+                documentId: result.documentId,
+                fileUrl: publicUrl,
+                fileType: ext,
+              }),
+            });
             console.log(`[UploadTiming] [UploadCenter] /api/generate-study-pack response received`);
-          }).catch((err) => {
-            console.warn("Failed to fire-and-forget study pack generation", err);
-          });
+          } catch (err) {
+            console.warn("Failed to fire study pack generation", err);
+          }
         };
 
         if (classification.category === "skip") {
@@ -312,7 +314,7 @@ function UploadArea({
             (!isLectures && !isNotes && !isPresentations); // Safe fallback if label differs
 
           if (isEnabled) {
-            fireStudyPack();
+            await fireStudyPack();
           } else {
             console.log(`[AI Trigger] Skipped auto-generation due to preferences: ${file.name}`);
           }
@@ -334,7 +336,7 @@ function UploadArea({
           const remembered = settings.aiAssessmentRememberedChoice;
 
           if (autoAssess || remembered === "generate") {
-            fireStudyPack();
+            await fireStudyPack();
           } else if (remembered === "skip") {
             console.log(`[AI Trigger] Skipped assessment file by remembered preference: ${file.name}`);
           } else {
@@ -369,14 +371,17 @@ function UploadArea({
     }
   };
 
-  const fireStudyPackGeneration = (documentId: string, fileUrl: string, fileType: string) => {
-    fetch("/api/generate-study-pack", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ documentId, fileUrl, fileType }),
-    }).catch((err) => {
-      console.warn("Failed to fire-and-forget study pack generation", err);
-    });
+  const fireStudyPackGeneration = async (documentId: string, fileUrl: string, fileType: string) => {
+    try {
+      await fetch("/api/generate-study-pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({ documentId, fileUrl, fileType }),
+      });
+    } catch (err) {
+      console.warn("Failed to fire study pack generation", err);
+    }
   };
 
   const handleConfirmGenerate = (remember: boolean) => {

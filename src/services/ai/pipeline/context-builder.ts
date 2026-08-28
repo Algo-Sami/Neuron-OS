@@ -47,7 +47,6 @@ export class ContextBuilder {
     const budgetManager = new ContextBudgetManager(maxTokens);
     const selectedChunks: SearchResult[] = [];
     let chunksSkipped = 0;
-    let chunksProcessed = 0;
 
     // Stable sort by similarity descending to prioritize higher confidence matches.
     // For direct document summaries, all similarity values are 1.0, preserving index order.
@@ -55,7 +54,6 @@ export class ContextBuilder {
 
     // ── Phase 3: Evaluate chunks individually ──
     for (const chunk of sortedChunks) {
-      chunksProcessed++;
       const textToFit = chunk.content;
       
       const fitResult = budgetManager.fitAndAdd(textToFit);

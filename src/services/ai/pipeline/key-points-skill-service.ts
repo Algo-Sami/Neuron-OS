@@ -94,7 +94,6 @@ export class KeyPointsSkillService {
 
       // ── Step 2: Establish Source Knowledge Input Priority Chain ────────────
       let sourceText = '';
-      let sourceAssetId: string | undefined;
 
       // Priority 1: Ready detailed summary asset
       const summaryAsset = await KnowledgeAssetRegistry.findExisting(supabase, documentId, 'summary', 'detailed');
@@ -102,7 +101,6 @@ export class KeyPointsSkillService {
         const content = summaryAsset.content as { summaryText?: string } | null;
         if (content?.summaryText) {
           sourceText = content.summaryText;
-          sourceAssetId = summaryAsset.id;
           logger.info(`[KeyPointsSkill] Loaded summary asset [${summaryAsset.id}] as primary source.`);
         }
       }

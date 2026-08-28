@@ -14,13 +14,6 @@ interface RpcSearchResult {
   similarity: number;
 }
 
-interface DocumentRelation {
-  id: string;
-  user_id: string;
-  title: string;
-  deleted_at: string | null;
-}
-
 export interface SearchResult {
   id: string;
   document_id: string;

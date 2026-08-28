@@ -119,24 +119,25 @@ export function UploadZone({ onUploadComplete }: { onUploadComplete?: (documentI
       })
       console.log(`[UploadTiming] saveUploadMetadata END in ${(performance.now() - tMeta).toFixed(0)}ms`);
 
-      // Fire-and-forget: Enqueue AI study pack generation in the background.
-      // The HTTP upload response returns immediately; this does NOT block on pipeline completion.
+      // Enqueue AI study pack generation in the background.
       // The idempotency check inside /api/generate-study-pack prevents duplicate jobs.
       if (result.documentId) {
-        console.log(`[UploadTiming] Dispatching /api/generate-study-pack fire-and-forget`);
-        fetch('/api/generate-study-pack', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            documentId: result.documentId,
-            fileUrl: publicUrl,
-            fileType: extension,
-          }),
-        }).then(() => {
+        console.log(`[UploadTiming] Dispatching /api/generate-study-pack`);
+        try {
+          await fetch('/api/generate-study-pack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            keepalive: true,
+            body: JSON.stringify({
+              documentId: result.documentId,
+              fileUrl: publicUrl,
+              fileType: extension,
+            }),
+          });
           console.log(`[UploadTiming] /api/generate-study-pack response received`);
-        }).catch((err) => {
-          console.warn('[UploadZone] Fire-and-forget study pack generation failed to dispatch:', err);
-        });
+        } catch (err) {
+          console.warn('[UploadZone] Study pack generation failed to dispatch:', err);
+        }
       }
 
       setProgress(100)

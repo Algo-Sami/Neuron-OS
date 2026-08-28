@@ -1,8 +1,34 @@
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { executeAICompletion } from './providers';
 import { getEmbedding } from './embeddings';
 import { getModelConfig } from './model-registry';
 import { logger } from '@/lib/logger';
+
+/**
+ * Returns a Supabase client that works in both Next.js (cookie-based) and
+ * standalone worker (service-role) contexts.
+ *
+ * Next.js API routes: createClient() succeeds — uses the user session cookie.
+ * Railway worker:     createClient() throws (no HTTP context) — falls back to
+ *                     a direct service-role client using env vars.
+ */
+async function createWorkerSafeClient() {
+  try {
+    return await createClient();
+  } catch {
+    // Running outside a Next.js request context (e.g. Railway worker).
+    // Fall back to a direct service-role client.
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) {
+      throw new Error('[AI Router] Cannot create Supabase client: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set.');
+    }
+    return createSupabaseClient(url, key, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+  }
+}
 
 // Router input parameters
 export interface RouterParams {
@@ -82,7 +108,7 @@ async function checkSemanticCache(
   _userId: string
 ): Promise<{ text: string; metadata: any } | null> {
   try {
-    const supabase = await createClient();
+    const supabase = await createWorkerSafeClient();
     const queryEmbedding = await getEmbedding(query);
 
     const { data: cacheHits, error } = await supabase.rpc('match_semantic_cache', {
@@ -115,7 +141,7 @@ async function checkSemanticCache(
  */
 async function saveToSemanticCache(query: string, response: string, metadata: any) {
   try {
-    const supabase = await createClient();
+    const supabase = await createWorkerSafeClient();
     const embedding = await getEmbedding(query);
     
     // Set cache entry to expire in 7 days
@@ -150,7 +176,7 @@ async function checkUsageAndLog(
   isCheckOnly: boolean = false
 ): Promise<{ limitExceeded: boolean; shouldDowngrade: boolean }> {
   try {
-    const supabase = await createClient();
+    const supabase = await createWorkerSafeClient();
     
     // 1. Resolve student tier (Free vs Premium)
     const { data: profile } = await supabase

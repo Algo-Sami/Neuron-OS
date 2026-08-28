@@ -3,28 +3,78 @@
  *
  * Creates and manages a single ioredis connection for BullMQ.
  * Supports standard Redis (redis://) and TLS Redis (rediss://) — compatible
- * with local Redis, Upstash, Redis Cloud, AWS ElastiCache, and GCP Memorystore.
+ * with local Redis, Railway, Upstash, Redis Cloud, AWS ElastiCache, and GCP Memorystore.
  *
  * SECURITY: Redis connection details must remain server-side only.
  * This module must never be imported by browser/client bundles.
  */
 
-import Redis from 'ioredis';
+import Redis, { type RedisOptions } from 'ioredis';
 import { logger } from '@/lib/logger';
 
 // Singleton connection instance — reused across queue and worker
 let redisInstance: Redis | null = null;
 
-function getRedisUrl(): string {
-  const url = process.env.REDIS_URL;
-  if (!url) {
-    throw new Error(
-      '[Redis] REDIS_URL environment variable is not set. ' +
-      'Set REDIS_URL=redis://127.0.0.1:6379 for local development or ' +
-      'a hosted Redis URL (rediss://...) for production.'
-    );
+export function getRedisUrl(): string {
+  // Check standard and Railway/Vercel/Cloud-specific environment variables
+  const url =
+    process.env.REDIS_URL ||
+    process.env.REDIS_PRIVATE_URL ||
+    process.env.REDIS_PUBLIC_URL ||
+    process.env.KV_URL;
+
+  if (url) {
+    return url;
   }
-  return url;
+
+  // Check separate Railway/Docker host variables
+  const host = process.env.REDISHOST || process.env.REDIS_HOST;
+  const port = process.env.REDISPORT || process.env.REDIS_PORT || '6379';
+  const password = process.env.REDISPASSWORD || process.env.REDIS_PASSWORD;
+  const user = process.env.REDISUSER || process.env.REDIS_USER || 'default';
+
+  if (host) {
+    if (password) {
+      return `redis://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}`;
+    }
+    return `redis://${host}:${port}`;
+  }
+
+  throw new Error(
+    '[Redis] No Redis environment variables found. ' +
+    'Set REDIS_URL (or REDIS_PRIVATE_URL / REDISHOST) for Railway / cloud deployments, ' +
+    'or REDIS_URL=redis://127.0.0.1:6379 for local development.'
+  );
+}
+
+function getRedisOptions(isDedicated: boolean = false): RedisOptions {
+  const url = getRedisUrl();
+  const isTLS = url.startsWith('rediss://');
+
+  return {
+    maxRetriesPerRequest: null, // Required by BullMQ
+    enableReadyCheck: false,   // Required by BullMQ
+    family: 4,                 // Force IPv4 for reliable container networking
+    connectTimeout: 20000,     // 20s connection timeout
+    tls: isTLS
+      ? {
+          rejectUnauthorized: false, // Prevents TLS handshake failure on hosted cloud certs
+        }
+      : undefined,
+    retryStrategy(times) {
+      const maxDelay = 30_000;
+      const delay = Math.min(2 ** times * 200, maxDelay);
+      logger.warn(`[Redis] Reconnect attempt ${times} (dedicated=${isDedicated}), retrying in ${delay}ms`);
+      return delay;
+    },
+    reconnectOnError(err) {
+      const targetErrors = ['READONLY', 'ECONNRESET', 'ETIMEDOUT'];
+      if (targetErrors.some((e) => err.message.includes(e))) {
+        return true;
+      }
+      return false;
+    },
+  };
 }
 
 /**
@@ -38,33 +88,17 @@ export function getRedisConnection(): Redis {
 
   const url = getRedisUrl();
   const isTLS = url.startsWith('rediss://');
+  const safeHost = url.split('@').pop() || 'localhost';
 
-  logger.info(`[Redis] Connecting to Redis (TLS: ${isTLS})`);
+  logger.info(`[Redis] Connecting shared client to Redis -> ${safeHost} (TLS: ${isTLS})`);
 
-  redisInstance = new Redis(url, {
-    maxRetriesPerRequest: null, // Required by BullMQ
-    enableReadyCheck: false,   // Required by BullMQ
-    tls: isTLS ? {} : undefined,
-    retryStrategy(times) {
-      const maxDelay = 30_000;
-      const delay = Math.min(2 ** times * 200, maxDelay);
-      logger.warn(`[Redis] Reconnect attempt ${times}, retry in ${delay}ms`);
-      return delay;
-    },
-    reconnectOnError(err) {
-      const targetErrors = ['READONLY', 'ECONNRESET'];
-      if (targetErrors.some((e) => err.message.includes(e))) {
-        return true;
-      }
-      return false;
-    },
-  });
+  redisInstance = new Redis(url, getRedisOptions(false));
 
-  redisInstance.on('connect', () => logger.info('[Redis] Connection established'));
-  redisInstance.on('ready', () => logger.info('[Redis] Ready'));
-  redisInstance.on('error', (err) => logger.error('[Redis] Connection error:', err));
-  redisInstance.on('close', () => logger.warn('[Redis] Connection closed'));
-  redisInstance.on('reconnecting', () => logger.warn('[Redis] Reconnecting...'));
+  redisInstance.on('connect', () => logger.info('[Redis] Shared connection established'));
+  redisInstance.on('ready', () => logger.info('[Redis] Shared client is Ready'));
+  redisInstance.on('error', (err) => logger.error('[Redis] Shared connection error:', err));
+  redisInstance.on('close', () => logger.warn('[Redis] Shared connection closed'));
+  redisInstance.on('reconnecting', () => logger.warn('[Redis] Shared connection reconnecting...'));
 
   return redisInstance;
 }
@@ -74,7 +108,7 @@ export function getRedisConnection(): Redis {
  */
 export async function closeRedisConnection(): Promise<void> {
   if (redisInstance) {
-    logger.info('[Redis] Closing connection gracefully');
+    logger.info('[Redis] Closing shared connection gracefully');
     await redisInstance.quit();
     redisInstance = null;
   }
@@ -88,14 +122,18 @@ export async function closeRedisConnection(): Promise<void> {
 export function createDedicatedRedisConnection(): Redis {
   const url = getRedisUrl();
   const isTLS = url.startsWith('rediss://');
+  const safeHost = url.split('@').pop() || 'localhost';
 
-  return new Redis(url, {
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-    tls: isTLS ? {} : undefined,
-    retryStrategy(times) {
-      const maxDelay = 30_000;
-      return Math.min(2 ** times * 200, maxDelay);
-    },
-  });
+  logger.info(`[Redis] Creating dedicated worker subscriber connection -> ${safeHost} (TLS: ${isTLS})`);
+
+  const client = new Redis(url, getRedisOptions(true));
+
+  client.on('connect', () => logger.info('[Redis] Dedicated worker connection established'));
+  client.on('ready', () => logger.info('[Redis] Dedicated worker client is Ready'));
+  client.on('error', (err) => logger.error('[Redis] Dedicated worker connection error:', err));
+  client.on('close', () => logger.warn('[Redis] Dedicated worker connection closed'));
+  client.on('reconnecting', () => logger.warn('[Redis] Dedicated worker connection reconnecting...'));
+
+  return client;
 }
+

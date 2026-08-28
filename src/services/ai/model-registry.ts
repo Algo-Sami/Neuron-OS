@@ -27,43 +27,45 @@ export type SkillType =
   | 'ocr'
   | 'embedding';
 
-// Central model configuration mapped by skill
+// Central model configuration mapped by skill.
+// Gemini is the primary provider for all skills.
+// OpenRouter is used as automatic fallback by executeAICompletion() in providers.ts.
 export const MODEL_REGISTRY: Record<SkillType, ModelConfig> = {
   summary: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   key_points: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   definitions: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   examples: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   quiz: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   flashcards: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   study_coach: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   evaluation: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   chat: {
-    provider: 'openrouter',
-    modelName: 'google/gemini-2.5-flash'
+    provider: 'gemini',
+    modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   },
   ocr: {
     provider: 'gemini',
