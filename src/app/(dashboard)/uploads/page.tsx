@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { cleanupExpiredRecycledDocuments } from "@/actions/uploads";
-import { ClassificationCard, PendingDoc } from "@/components/shared/classification-card";
+import type { PendingDoc } from "@/components/shared/classification-card";
 import { UploadCenter } from "@/components/uploads/upload-center";
 
 export const dynamic = 'force-dynamic';
@@ -51,26 +51,22 @@ export default async function UploadsPage() {
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full pb-10 animate-in fade-in duration-300">
       {/* Page header */}
-      <div className="flex items-center justify-between border-b border-border/40 pb-5">
+      <div className="flex items-center justify-between border-b border-border/40 pb-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground select-none">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground select-none">
             Uploads
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Upload academic files and track your complete upload history.
+            Add study material and manage your uploaded files.
           </p>
         </div>
       </div>
 
-      {/* AI Auto-Classification fallback prompts */}
-      {pendingDocs.length > 0 && (
-        <ClassificationCard pendingDocs={pendingDocs} subjects={subjects || []} />
-      )}
-
-      {/* Upload Center — Upload Area + History */}
+      {/* Upload Center — Upload Area + Needs Your Attention + Upload History */}
       <UploadCenter
         documents={userUploadedDocs || []}
         subjects={subjects || []}
+        pendingDocs={pendingDocs}
       />
     </div>
   );

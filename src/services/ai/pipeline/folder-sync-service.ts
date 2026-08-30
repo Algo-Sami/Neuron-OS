@@ -144,9 +144,9 @@ export class FolderSyncService {
     //          └── <Document Name>/ e.g. PP Lecture 6, Lecture 2, Assignment 1
     //              └── Summary.pdf
     const classification = classifyFilename(docTitle);
-    // Use the classified folder name if found, fall back to 'Documents' (not 'Others')
+    // Use the classified folder name if found, fall back to 'Lectures'
     // so file-explorer labels remain clean and professional.
-    const categoryName = classification.folderName ?? 'Documents';
+    const categoryName = classification.folderName ?? 'Lectures';
 
     const categoryFolderId = await this.resolveOrCreateFolder(
       userId, subjectId, rootFolderId, categoryName

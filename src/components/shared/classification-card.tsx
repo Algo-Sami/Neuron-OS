@@ -3,9 +3,15 @@
 import * as React from "react";
 import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, Check, ChevronRight, Settings, Trash2, Loader2, AlertCircle, FolderOpen } from "lucide-react";
 import {
-  confirmAIClassification,
+  FileText,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  FolderOpen,
+  Check,
+} from "lucide-react";
+import {
   rejectOrCustomizeClassification,
   deletePendingUpload,
 } from "@/actions/uploads";
@@ -40,9 +46,9 @@ interface ClassificationCardProps {
   subjects?: SubjectItem[];
 }
 
-// ── Subject Picker Dialog ───────────────────────────────────────────────────
+// ── Review Dialog (Confirm File Location) ───────────────────────────────────
 
-interface SubjectPickerDialogProps {
+interface ReviewDialogProps {
   open: boolean;
   onClose: () => void;
   doc: PendingDoc | null;
@@ -51,108 +57,142 @@ interface SubjectPickerDialogProps {
   isPending: boolean;
 }
 
-function SubjectPickerDialog({ open, onClose, doc, subjects, onAssign, isPending }: SubjectPickerDialogProps) {
+const DEFAULT_FOLDERS = [
+  "Lectures",
+  "Assignments",
+  "Quizzes",
+  "Presentations",
+  "Lab",
+  "Projects",
+  "Notes",
+];
+
+function ReviewDialog({
+  open,
+  onClose,
+  doc,
+  subjects,
+  onAssign,
+  isPending,
+}: ReviewDialogProps) {
   const initialMatchedSubject = React.useMemo(() => {
     if (!doc) return null;
     return subjects.find(
       (s) =>
         s.name.toLowerCase() === (doc.ai_subject || "").toLowerCase() ||
-        (doc.ai_subject && s.name.toLowerCase().startsWith(doc.ai_subject.toLowerCase()))
+        (doc.ai_subject &&
+          s.name.toLowerCase().startsWith(doc.ai_subject.toLowerCase()))
     );
   }, [doc, subjects]);
 
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(() => initialMatchedSubject?.id || "");
-  const [customFolder, setCustomFolder] = useState<string>(() => doc?.ai_topic || "Lectures");
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
+    () => initialMatchedSubject?.id || ""
+  );
+  const [selectedFolder, setSelectedFolder] = useState<string>(
+    () => doc?.ai_topic || "Lectures"
+  );
+  const [customFolder, setCustomFolder] = useState<string>("");
 
-  const DEFAULT_TOPICS = ["Lectures", "Assignments", "Quizzes", "Presentations", "Lab", "Projects", "Notes"];
+  React.useEffect(() => {
+    if (doc) {
+      const match = subjects.find(
+        (s) =>
+          s.name.toLowerCase() === (doc.ai_subject || "").toLowerCase() ||
+          (doc.ai_subject &&
+            s.name.toLowerCase().startsWith(doc.ai_subject.toLowerCase()))
+      );
+      setSelectedSubjectId(match?.id || (subjects[0]?.id ?? ""));
+      setSelectedFolder(doc.ai_topic || "Lectures");
+      setCustomFolder("");
+    }
+  }, [doc, subjects]);
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId);
+  const effectiveFolder = customFolder.trim() || selectedFolder || "Lectures";
+  const hasSuggestion = Boolean(doc?.ai_subject && doc.ai_subject !== "General Study");
 
   const handleSave = () => {
     if (!doc || !selectedSubject) return;
-    onAssign(doc.id, selectedSubject.name, customFolder || "Lectures");
+    onAssign(doc.id, selectedSubject.name, effectiveFolder);
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg bg-card/98 border border-border/60 shadow-2xl backdrop-blur-lg rounded-xl p-6">
+    <Dialog open={open} onOpenChange={(o) => !o && !isPending && onClose()}>
+      <DialogContent className="sm:max-w-md bg-card/98 border border-border/60 shadow-xl backdrop-blur-md rounded-xl p-6">
         <DialogHeader>
-          <DialogTitle className="text-base font-bold text-foreground flex items-center gap-2">
-            <FolderOpen className="h-4 w-4 text-purple-500" />
-            Assign to Subject
+          <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+            <FolderOpen className="h-4 w-4 text-primary" />
+            Confirm File Location
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground mt-1 leading-relaxed">
-            Select which subject this file belongs to.
-            {doc && (
-              <span className="block mt-1.5 text-foreground/80 font-medium truncate">
-                📄 {doc.title}
-              </span>
-            )}
+          <DialogDescription className="text-xs text-muted-foreground mt-1">
+            Where should this file go?
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 mt-2">
-          {/* Subject Selection */}
-          <div>
-            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              Select Subject
+        {doc && (
+          <div className="flex items-center gap-2.5 p-3 rounded-lg bg-muted/40 border border-border/50 text-xs">
+            <FileText className="h-4 w-4 text-primary shrink-0" />
+            <span className="font-medium text-foreground truncate">{doc.title}</span>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-4 mt-1">
+          {/* Subject Dropdown */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-foreground">
+              Subject
             </label>
-            <div className="mt-2 grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto pr-1">
-              {subjects.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-4">
-                  No subjects found. Create a subject first.
-                </p>
-              ) : (
-                subjects.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => setSelectedSubjectId(s.id)}
-                    className={cn(
-                      "flex items-center gap-3 p-2.5 rounded-lg border text-left transition-all duration-150",
-                      selectedSubjectId === s.id
-                        ? "border-purple-500/60 bg-purple-500/10 text-foreground"
-                        : "border-border/40 bg-background/60 text-muted-foreground hover:border-border hover:bg-background/90 hover:text-foreground"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors",
-                        selectedSubjectId === s.id
-                          ? "border-purple-500 bg-purple-500"
-                          : "border-muted-foreground/40"
-                      )}
-                    >
-                      {selectedSubjectId === s.id && (
-                        <Check className="h-2.5 w-2.5 text-white" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold truncate">{s.name}</p>
-                      {s.code && (
-                        <p className="text-[10px] text-muted-foreground">{s.code}</p>
-                      )}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
+            {subjects.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No subjects found. Please create a subject first.
+              </p>
+            ) : (
+              <select
+                value={selectedSubjectId}
+                onChange={(e) => setSelectedSubjectId(e.target.value)}
+                className="w-full rounded-lg border border-border/60 bg-background text-foreground text-xs px-3 py-2 outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-colors cursor-pointer"
+              >
+                <option value="" disabled>
+                  Select a subject
+                </option>
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} {s.code ? `(${s.code})` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            {hasSuggestion ? (
+              <p className="text-[11px] text-muted-foreground">
+                Suggested subject:{" "}
+                <span className="text-foreground font-medium">{doc?.ai_subject}</span>
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Neuron couldn't confidently identify the subject.
+              </p>
+            )}
           </div>
 
-          {/* Folder / Topic */}
-          <div>
-            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              Destination Folder
+          {/* Folder Selector */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-foreground">
+              Folder
             </label>
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {DEFAULT_TOPICS.map((topic) => (
+            <div className="flex flex-wrap gap-1.5">
+              {DEFAULT_FOLDERS.map((topic) => (
                 <button
+                  type="button"
                   key={topic}
-                  onClick={() => setCustomFolder(topic)}
+                  onClick={() => {
+                    setSelectedFolder(topic);
+                    setCustomFolder("");
+                  }}
                   className={cn(
-                    "text-[11px] px-2.5 py-1 rounded-md border transition-all",
-                    customFolder === topic
-                      ? "border-purple-500/60 bg-purple-500/10 text-purple-400 font-semibold"
-                      : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground"
+                    "text-[11px] px-2.5 py-1 rounded-md border transition-all cursor-pointer",
+                    selectedFolder === topic && !customFolder
+                      ? "border-primary bg-primary/10 text-primary font-medium"
+                      : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
                   )}
                 >
                   {topic}
@@ -160,21 +200,21 @@ function SubjectPickerDialog({ open, onClose, doc, subjects, onAssign, isPending
               ))}
             </div>
             <Input
-              placeholder="Or type custom folder name..."
+              placeholder="Or type custom folder name…"
               value={customFolder}
               onChange={(e) => setCustomFolder(e.target.value)}
-              className="h-7 text-xs bg-background mt-2"
+              className="h-8 text-xs bg-background mt-1"
             />
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-border/30">
+        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-border/40">
           <Button
             variant="ghost"
             size="sm"
             disabled={isPending}
             onClick={onClose}
-            className="text-xs h-8 px-4 text-muted-foreground"
+            className="text-xs h-8 px-4 text-muted-foreground cursor-pointer"
           >
             Cancel
           </Button>
@@ -182,17 +222,17 @@ function SubjectPickerDialog({ open, onClose, doc, subjects, onAssign, isPending
             size="sm"
             disabled={isPending || !selectedSubjectId}
             onClick={handleSave}
-            className="text-xs h-8 px-5 bg-purple-600 hover:bg-purple-700 text-white font-medium gap-1.5"
+            className="text-xs h-8 px-5 gap-1.5 cursor-pointer font-medium"
           >
             {isPending ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Saving...
+                Saving…
               </>
             ) : (
               <>
                 <Check className="h-3.5 w-3.5" />
-                Assign & Organize
+                Save
               </>
             )}
           </Button>
@@ -202,68 +242,40 @@ function SubjectPickerDialog({ open, onClose, doc, subjects, onAssign, isPending
   );
 }
 
-// ── Main Classification Card ─────────────────────────────────────────────────
+// ── Main Needs Your Attention Section ──────────────────────────────────────
 
-export function ClassificationCard({ pendingDocs, subjects = [] }: ClassificationCardProps) {
+export function ClassificationCard({
+  pendingDocs,
+  subjects = [],
+}: ClassificationCardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [editingDocId, setEditingDocId] = useState<string | null>(null);
-  const [customSubject, setCustomSubject] = useState("");
-  const [customTopic, setCustomTopic] = useState("");
+
+  const [reviewDoc, setReviewDoc] = useState<PendingDoc | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PendingDoc | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
 
-  // Subject picker dialog state
-  const [pickerDoc, setPickerDoc] = useState<PendingDoc | null>(null);
-
   const activeDocs = pendingDocs.filter((d) => !deletedIds.includes(d.id));
 
-  if (!activeDocs || activeDocs.length === 0) return null;
+  // Section 6: If zero pending files, completely hide the section.
+  if (activeDocs.length === 0) return null;
 
-  const handleConfirm = (docId: string) => {
-    startTransition(async () => {
-      try {
-        await confirmAIClassification(docId);
-        router.refresh();
-      } catch (err) {
-        console.error("Failed to confirm classification:", err);
-      }
-    });
-  };
-
-  const handleCustomizeSave = (docId: string) => {
-    if (!customSubject.trim() || !customTopic.trim()) return;
-    startTransition(async () => {
-      try {
-        await rejectOrCustomizeClassification(docId, customSubject, customTopic);
-        setEditingDocId(null);
-        setCustomSubject("");
-        setCustomTopic("");
-        router.refresh();
-      } catch (err) {
-        console.error("Failed to customize classification:", err);
-      }
-    });
-  };
-
-  const handlePickerAssign = (docId: string, subjectName: string, topic: string) => {
+  const handleReviewAssign = (
+    docId: string,
+    subjectName: string,
+    topic: string
+  ) => {
     startTransition(async () => {
       try {
         await rejectOrCustomizeClassification(docId, subjectName, topic);
-        setPickerDoc(null);
+        setReviewDoc(null);
         router.refresh();
       } catch (err) {
         console.error("Failed to assign subject:", err);
       }
     });
-  };
-
-  const startEditing = (doc: PendingDoc) => {
-    setEditingDocId(doc.id);
-    setCustomSubject(doc.ai_subject || "");
-    setCustomTopic(doc.ai_topic || "");
   };
 
   const handleDeleteConfirm = async () => {
@@ -278,7 +290,7 @@ export function ClassificationCard({ pendingDocs, subjects = [] }: Classificatio
       startTransition(() => {
         router.refresh();
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to delete pending upload:", err);
       setDeleteError("Unable to delete this upload. Please try again.");
     } finally {
@@ -287,11 +299,21 @@ export function ClassificationCard({ pendingDocs, subjects = [] }: Classificatio
   };
 
   return (
-    <div className="flex flex-col gap-4 w-full animate-in fade-in duration-300">
+    <section aria-labelledby="needs-attention-heading" className="flex flex-col gap-3 w-full">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-semibold text-primary/90">
-          <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
-          <span>AI Auto-Classification Pending Approval ({activeDocs.length})</span>
+        <div>
+          <h2
+            id="needs-attention-heading"
+            className="text-base font-semibold text-foreground flex items-center gap-2"
+          >
+            <span>Needs Your Attention</span>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+              {activeDocs.length}
+            </span>
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Files that need your confirmation before they can be organized.
+          </p>
         </div>
       </div>
 
@@ -302,227 +324,92 @@ export function ClassificationCard({ pendingDocs, subjects = [] }: Classificatio
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {activeDocs.map((doc) => {
-          const confidencePct = Math.round((doc.classification_confidence || 0) * 100);
-          const isEditing = editingDocId === doc.id;
-          const hasSubjectSuggestion = !!(doc.ai_subject && doc.ai_subject !== "General Study");
-
-          return (
-            <div
-              key={doc.id}
-              className="relative overflow-hidden rounded-xl border border-purple-500/20 bg-gradient-to-br from-purple-500/5 via-background to-card p-5 shadow-md backdrop-blur-md transition-all duration-300"
-            >
-              {/* Colored side-border effect */}
-              <div className="absolute left-0 top-0 h-full w-1 bg-gradient-to-b from-purple-500 to-indigo-600" />
-
-              <div className="flex flex-col gap-3">
-                {/* Header */}
-                <div className="flex items-start justify-between min-w-0">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-purple-500 uppercase tracking-wider">
-                      {doc.ai_doc_type || "Lecture Material"}
-                    </p>
-                    <h3 className="font-semibold text-foreground text-sm mt-0.5 truncate pr-2" title={doc.title}>
-                      {doc.title}
-                    </h3>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex items-center gap-1 bg-purple-500/10 text-purple-600 dark:text-purple-400 px-2 py-0.5 rounded-full text-xs font-medium border border-purple-500/25">
-                      <span>{confidencePct}% Match</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label="Delete upload"
-                      onClick={() => {
-                        setDeleteError(null);
-                        setDeleteTarget(doc);
-                      }}
-                      className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Confidence Bar */}
-                <div className="w-full bg-muted/60 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-gradient-to-r from-purple-500 to-indigo-600 h-full rounded-full transition-all duration-500"
-                    style={{ width: `${confidencePct}%` }}
-                  />
-                </div>
-
-                {!isEditing ? (
-                  <>
-                    {/* Suggested Course Location Details */}
-                    <div className="flex items-center gap-4 bg-muted/30 p-2.5 rounded-lg border border-border/50 text-xs">
-                      <div className="flex flex-col gap-1 min-w-0">
-                        <span className="text-[10px] text-muted-foreground uppercase font-medium">Suggested Subject</span>
-                        <span className={cn("font-medium truncate", !hasSubjectSuggestion ? "text-amber-500 dark:text-amber-400 font-semibold" : "text-foreground")}>
-                          {hasSubjectSuggestion ? doc.ai_subject : "Unassigned — Select Subject"}
-                        </span>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="flex flex-col gap-1 min-w-0">
-                        <span className="text-[10px] text-muted-foreground uppercase font-medium">Suggested Folder</span>
-                        <span className="font-medium text-foreground truncate">{doc.ai_topic || "Lectures"}</span>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center justify-between gap-2 mt-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={isPending}
-                        onClick={() => {
-                          setDeleteError(null);
-                          setDeleteTarget(doc);
-                        }}
-                        className="text-xs h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                        Delete
-                      </Button>
-
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={isPending}
-                          onClick={() => startEditing(doc)}
-                          className="text-xs h-8 text-muted-foreground hover:text-foreground hover:bg-muted"
-                        >
-                          <Settings className="mr-1.5 h-3.5 w-3.5" />
-                          Customize
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={isPending}
-                          onClick={() => {
-                            if (!hasSubjectSuggestion) {
-                              // Open the subject picker dialog with user's real subjects
-                              setPickerDoc(doc);
-                            } else {
-                              handleConfirm(doc.id);
-                            }
-                          }}
-                          className="text-xs h-8 bg-purple-600 hover:bg-purple-700 text-white shadow-sm"
-                        >
-                          <Check className="mr-1.5 h-3.5 w-3.5" />
-                          {!hasSubjectSuggestion ? "Choose Subject" : "Confirm & Organize"}
-                        </Button>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  /* Custom Organization Form */
-                  <div className="flex flex-col gap-3 mt-1 bg-muted/40 p-3 rounded-lg border border-border/80">
-                    <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-                      Specify Subject & Folder Location
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[9px] font-semibold text-muted-foreground">Subject Name</label>
-                        <Input
-                          placeholder="e.g. Operating Systems"
-                          value={customSubject}
-                          list="user-subjects-list"
-                          onChange={(e) => setCustomSubject(e.target.value)}
-                          className="h-7 text-xs bg-background"
-                        />
-                        <datalist id="user-subjects-list">
-                          {subjects.map((s) => (
-                            <option key={s.id} value={s.name}>
-                              {s.code ? `${s.code} – ${s.name}` : s.name}
-                            </option>
-                          ))}
-                        </datalist>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[9px] font-semibold text-muted-foreground">Folder/Topic Name</label>
-                        <Input
-                          placeholder="e.g. Process Management"
-                          value={customTopic}
-                          onChange={(e) => setCustomTopic(e.target.value)}
-                          className="h-7 text-xs bg-background"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 mt-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={isPending}
-                        onClick={() => {
-                          setDeleteError(null);
-                          setDeleteTarget(doc);
-                        }}
-                        className="text-[11px] h-6 px-2 text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="mr-1 h-3 w-3" />
-                        Delete
-                      </Button>
-
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={isPending}
-                          onClick={() => setEditingDocId(null)}
-                          className="text-[11px] h-6 px-2 text-muted-foreground"
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={isPending || !customSubject.trim() || !customTopic.trim()}
-                          onClick={() => handleCustomizeSave(doc.id)}
-                          className="text-[11px] h-6 px-2 bg-foreground text-background hover:bg-foreground/90 font-medium"
-                        >
-                          Save Course Path
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        {activeDocs.map((doc) => (
+          <div
+            key={doc.id}
+            className="flex items-center justify-between gap-3 p-3.5 rounded-xl border border-border/60 bg-card/60 hover:bg-card/90 transition-all duration-150"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <FileText className="h-4.5 w-4.5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div className="min-w-0">
+                <p
+                  className="text-xs font-medium text-foreground truncate"
+                  title={doc.title}
+                >
+                  {doc.title}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Subject needs confirmation
+                </p>
               </div>
             </div>
-          );
-        })}
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isPending || isDeleting}
+                onClick={() => {
+                  setDeleteError(null);
+                  setReviewDoc(doc);
+                }}
+                className="text-xs h-7 px-2.5 cursor-pointer font-medium"
+              >
+                Review
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Delete ${doc.title}`}
+                disabled={isPending || isDeleting}
+                onClick={() => {
+                  setDeleteError(null);
+                  setDeleteTarget(doc);
+                }}
+                className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* Subject Picker Dialog — shown when "Choose Subject" is clicked */}
-      <SubjectPickerDialog
-        key={pickerDoc?.id ?? 'closed'}
-        open={pickerDoc !== null}
-        onClose={() => setPickerDoc(null)}
-        doc={pickerDoc}
+      {/* Review Dialog */}
+      <ReviewDialog
+        key={reviewDoc?.id ?? "closed"}
+        open={reviewDoc !== null}
+        onClose={() => setReviewDoc(null)}
+        doc={reviewDoc}
         subjects={subjects}
-        onAssign={handlePickerAssign}
+        onAssign={handleReviewAssign}
         isPending={isPending}
       />
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent className="sm:max-w-md bg-card/98 border border-border/60 shadow-2xl backdrop-blur-lg rounded-xl p-6">
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && !isDeleting && setDeleteTarget(null)}
+      >
+        <DialogContent className="sm:max-w-md bg-card/98 border border-border/60 shadow-xl backdrop-blur-md rounded-xl p-6">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-foreground">
+            <DialogTitle className="text-base font-semibold text-foreground">
               Delete Upload?
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground mt-2 leading-relaxed">
-              Are you sure you want to delete this file? This will remove the uploaded file and its pending classification request. This action cannot be undone.
+              Are you sure you want to delete this file? This will remove the
+              uploaded file and its pending classification request. This action
+              cannot be undone.
             </DialogDescription>
           </DialogHeader>
 
           {deleteTarget && (
             <div className="my-2 p-3 rounded-lg bg-muted/40 border border-border/50 text-xs">
-              <p className="font-semibold text-foreground truncate">{deleteTarget.title}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Suggested Subject: {deleteTarget.ai_subject || "Unassigned"}
+              <p className="font-medium text-foreground truncate">
+                {deleteTarget.title}
               </p>
             </div>
           )}
@@ -533,7 +420,7 @@ export function ClassificationCard({ pendingDocs, subjects = [] }: Classificatio
               size="sm"
               disabled={isDeleting}
               onClick={() => setDeleteTarget(null)}
-              className="text-xs h-8 px-4 border-border text-foreground hover:bg-muted"
+              className="text-xs h-8 px-4 border-border text-foreground hover:bg-muted cursor-pointer"
             >
               Cancel
             </Button>
@@ -542,12 +429,12 @@ export function ClassificationCard({ pendingDocs, subjects = [] }: Classificatio
               size="sm"
               disabled={isDeleting}
               onClick={handleDeleteConfirm}
-              className="text-xs h-8 px-4 bg-red-600 hover:bg-red-700 text-white font-medium gap-1.5"
+              className="text-xs h-8 px-4 font-medium gap-1.5 cursor-pointer"
             >
               {isDeleting ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Deleting...
+                  Deleting…
                 </>
               ) : (
                 <>
@@ -559,6 +446,6 @@ export function ClassificationCard({ pendingDocs, subjects = [] }: Classificatio
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </section>
   );
 }

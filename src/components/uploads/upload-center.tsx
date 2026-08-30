@@ -6,6 +6,7 @@ import React, {
   useCallback,
   useMemo,
   useTransition,
+  useEffect,
 } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -15,7 +16,6 @@ import {
   Image as ImageIcon,
   Archive,
   X,
-  CheckCircle2,
   AlertCircle,
   Loader2,
   Search,
@@ -30,12 +30,17 @@ import {
   BrainCircuit,
   ScrollText,
   HelpCircle,
-  FolderOpen,
-  CloudUpload,
-  Info,
   Calendar,
   HardDrive,
   Tag,
+  Filter,
+  Check,
+  RotateCw,
+  Clock,
+  Sparkles,
+  Layers,
+  Eye,
+  Folder,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { saveUploadMetadata, moveDocumentToRecycleBin } from "@/actions/uploads";
@@ -45,15 +50,18 @@ import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/store/settings-store";
 import { classifyFile } from "@/services/ai/ai-classification";
 import { AIStudyPackDialog } from "./ai-study-pack-dialog";
-
+import { ClassificationCard, type PendingDoc } from "@/components/shared/classification-card";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -74,23 +82,60 @@ interface DocumentRow {
   created_at: string;
   summary_status: string | null;
   quiz_status: string | null;
+  classification_status?: string | null;
   ai_subject: string | null;
   ai_topic: string | null;
   subject_id: string | null;
+  folder_id?: string | null;
   uploads?: { file_size: number | null } | null;
 }
 
 interface UploadCenterProps {
   documents: DocumentRow[];
   subjects: SubjectItem[];
+  pendingDocs?: PendingDoc[];
 }
 
-type UploadStatus = "idle" | "selected" | "uploading" | "success" | "error";
-type SortKey = "date" | "name" | "size" | "type" | "subject";
+type QueueItemStatus =
+  | "waiting"
+  | "uploading"
+  | "classifying"
+  | "success"
+  | "needs_review"
+  | "error";
+
+interface UploadQueueItem {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+  type: string;
+  status: QueueItemStatus;
+  progress: number;
+  errorMsg?: string;
+  documentId?: string;
+  destinationSubject?: string | null;
+  destinationFolder?: string | null;
+  abortController?: AbortController;
+}
+
+type SortKey = "date" | "name" | "type" | "subject";
 type SortDir = "asc" | "desc";
-type FilterKey = "all" | "pdf" | "docx" | "pptx" | "txt" | "image" | "completed" | "processing" | "failed";
+type FormatFilterKey = "all" | "pdf" | "docx" | "pptx" | "txt" | "image";
+type StatusFilterKey = "all" | "completed" | "processing" | "needs_review" | "failed";
 
 const ITEMS_PER_PAGE = 15;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+const VALID_EXTENSIONS = [
+  ".pdf",
+  ".docx",
+  ".pptx",
+  ".txt",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+];
 
 // ---------------------------------------------------------------------------
 // Helper utilities
@@ -117,17 +162,30 @@ function formatDate(iso: string): string {
 
 function getFileIcon(type: string | null | undefined, className = "h-4 w-4") {
   const t = (type || "").toLowerCase();
-  if (t === "pdf") return <FileText className={cn(className, "text-red-400")} />;
-  if (t === "docx" || t === "doc") return <FileText className={cn(className, "text-blue-400")} />;
-  if (t === "pptx" || t === "ppt") return <FileText className={cn(className, "text-orange-400")} />;
+  if (t === "pdf") return <FileText className={cn(className, "text-red-500")} />;
+  if (t === "docx" || t === "doc") return <FileText className={cn(className, "text-blue-500")} />;
+  if (t === "pptx" || t === "ppt") return <FileText className={cn(className, "text-orange-500")} />;
   if (t === "txt") return <FileText className={cn(className, "text-muted-foreground")} />;
   if (["jpg", "jpeg", "png", "webp", "gif", "svg"].includes(t))
-    return <ImageIcon className={cn(className, "text-emerald-400")} />;
-  if (t === "zip" || t === "rar") return <Archive className={cn(className, "text-yellow-400")} />;
+    return <ImageIcon className={cn(className, "text-emerald-500")} />;
+  if (t === "zip" || t === "rar") return <Archive className={cn(className, "text-amber-500")} />;
   return <File className={cn(className, "text-muted-foreground")} />;
 }
 
-function getStatusBadge(summaryStatus: string | null, quizStatus: string | null) {
+function getStatusBadge(
+  summaryStatus: string | null,
+  quizStatus: string | null,
+  classificationStatus?: string | null
+) {
+  if (classificationStatus === "needs_review" || classificationStatus === "pending") {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+        Needs Review
+      </span>
+    );
+  }
+
   const isProcessing =
     summaryStatus === "processing" || quizStatus === "processing";
   const isFailed =
@@ -139,15 +197,15 @@ function getStatusBadge(summaryStatus: string | null, quizStatus: string | null)
 
   if (isProcessing) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25">
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
         Processing
       </span>
     );
   }
   if (isFailed) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-destructive/10 text-destructive border border-destructive/20">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-destructive/10 text-destructive border border-destructive/20">
         <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
         Failed
       </span>
@@ -155,14 +213,14 @@ function getStatusBadge(summaryStatus: string | null, quizStatus: string | null)
   }
   if (isCompleted) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
         Completed
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground border border-border/50">
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border border-border/50">
       Uploaded
     </span>
   );
@@ -173,21 +231,113 @@ function isImageType(type: string | null | undefined) {
 }
 
 // ---------------------------------------------------------------------------
-// Upload Area (Section 1)
+// Phase 3: Lightweight Status & Statistics Overview
+// ---------------------------------------------------------------------------
+
+function UploadStatisticsStrip({
+  documents,
+  pendingCount,
+}: {
+  documents: DocumentRow[];
+  pendingCount: number;
+}) {
+  const totalCount = documents.length;
+
+  const completedCount = useMemo(() => {
+    return documents.filter((d) => {
+      return (
+        d.summary_status === "completed" ||
+        d.quiz_status === "completed" ||
+        (d.classification_status !== "needs_review" &&
+          d.summary_status !== "processing" &&
+          d.summary_status !== "failed" &&
+          d.quiz_status !== "failed")
+      );
+    }).length;
+  }, [documents]);
+
+  const processingCount = useMemo(() => {
+    return documents.filter(
+      (d) => d.summary_status === "processing" || d.quiz_status === "processing"
+    ).length;
+  }, [documents]);
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+      <div className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card/60">
+        <div className="h-8 w-8 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+          <Layers className="h-4 w-4 text-primary" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
+            Total Uploads
+          </p>
+          <p className="text-sm font-semibold text-foreground">{totalCount}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card/60">
+        <div className="h-8 w-8 rounded-md bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+          <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
+            Completed
+          </p>
+          <p className="text-sm font-semibold text-foreground">{completedCount}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card/60">
+        <div className="h-8 w-8 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+          <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
+            Processing
+          </p>
+          <p className="text-sm font-semibold text-foreground">{processingCount}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card/60">
+        <div
+          className={cn(
+            "h-8 w-8 rounded-md flex items-center justify-center shrink-0 border",
+            pendingCount > 0
+              ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+              : "bg-secondary border-border/40 text-muted-foreground"
+          )}
+        >
+          <Clock className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
+            Needs Review
+          </p>
+          <p className="text-sm font-semibold text-foreground">{pendingCount}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 & 3: Smart Upload Area (Multi-file, Queue, Progress, Destination Feedback)
 // ---------------------------------------------------------------------------
 
 function UploadArea({
   subjects,
   onUploadComplete,
+  dropZoneRef,
 }: {
   subjects: SubjectItem[];
   onUploadComplete: () => void;
+  dropZoneRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [isDragging, setIsDragging] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<UploadStatus>("idle");
-  const [errorMsg, setErrorMsg] = useState("");
+  const [queue, setQueue] = useState<UploadQueueItem[]>([]);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
   const settings = useSettingsStore();
@@ -201,87 +351,157 @@ function UploadArea({
     fileTypeLabel: string;
   } | null>(null);
 
-
-  const validExtensions = [".pdf", ".docx", ".pptx", ".txt", ".jpg", ".jpeg", ".png", ".webp"];
-
+  // Validate single file
   const validateFile = (f: File): string | null => {
-    if (f.size > 50 * 1024 * 1024) return "File exceeds the 50 MB limit.";
-    const hasValid = validExtensions.some((ext) =>
+    if (f.size <= 0) return `"${f.name}" is an empty file.`;
+    if (f.size > MAX_FILE_SIZE) return `"${f.name}" exceeds the 50 MB limit.`;
+    const hasValid = VALID_EXTENSIONS.some((ext) =>
       f.name.toLowerCase().endsWith(ext)
     );
-    if (!hasValid)
-      return "Unsupported file type. Please upload PDF, DOCX, PPTX, TXT, or an image.";
+    if (!hasValid) {
+      return `"${f.name}" has an unsupported file type. Supported: PDF · DOCX · PPTX · TXT · Images`;
+    }
     return null;
   };
 
-  const handleFile = (f: File) => {
-    const err = validateFile(f);
-    if (err) {
-      setStatus("error");
-      setErrorMsg(err);
-      return;
+  // Handle incoming files (drag-drop or file picker)
+  const handleFiles = (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+
+    const newErrors: string[] = [];
+    const validItems: UploadQueueItem[] = [];
+
+    files.forEach((f) => {
+      const err = validateFile(f);
+      if (err) {
+        newErrors.push(err);
+        return;
+      }
+
+      const isDuplicate = queue.some(
+        (item) =>
+          item.name === f.name &&
+          item.size === f.size &&
+          item.status !== "error" &&
+          item.status !== "success"
+      );
+      if (isDuplicate) {
+        newErrors.push(`"${f.name}" is already in the upload queue.`);
+        return;
+      }
+
+      const ext = f.name.split(".").pop()?.toLowerCase() || "unknown";
+      validItems.push({
+        id: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${f.name}`,
+        file: f,
+        name: f.name,
+        size: f.size,
+        type: ext,
+        status: "waiting",
+        progress: 0,
+      });
+    });
+
+    if (newErrors.length > 0) {
+      setValidationErrors((prev) => [...prev, ...newErrors]);
     }
-    setFile(f);
-    setStatus("selected");
-    setErrorMsg("");
-    setProgress(0);
+
+    if (validItems.length > 0) {
+      setQueue((prev) => [...prev, ...validItems]);
+    }
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files) {
+      handleFiles(e.dataTransfer.files);
+    }
   };
 
-  const handleUpload = async () => {
-    if (!file) return;
-    setStatus("uploading");
-    setProgress(10);
+  // Upload single queue item
+  const uploadItem = useCallback(
+    async (item: UploadQueueItem) => {
+      const abortController = new AbortController();
 
-    try {
-      const supabase = createClient();
-      const {
-        data: { user },
-        error: authErr,
-      } = await supabase.auth.getUser();
-      if (authErr || !user) throw new Error("Please log in to upload files.");
+      setQueue((prev) =>
+        prev.map((q) =>
+          q.id === item.id
+            ? { ...q, status: "uploading", progress: 15, abortController }
+            : q
+        )
+      );
 
-      const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-      const filePath = `${user.id}/${Date.now()}_${cleanName}`;
-      setProgress(25);
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+          error: authErr,
+        } = await supabase.auth.getUser();
+        if (authErr || !user) throw new Error("Please log in to upload files.");
 
-      const tStorage = performance.now();
-      console.log(`[UploadTiming] [UploadCenter] Supabase storage upload START: ${filePath}`);
-      const { error: storageErr } = await supabase.storage
-        .from("documents")
-        .upload(filePath, file, { cacheControl: "3600", upsert: false });
-      if (storageErr) throw storageErr;
-      console.log(`[UploadTiming] [UploadCenter] Supabase storage upload END in ${(performance.now() - tStorage).toFixed(0)}ms`);
-      setProgress(70);
+        const cleanName = item.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const filePath = `${user.id}/${Date.now()}_${cleanName}`;
 
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("documents").getPublicUrl(filePath);
+        setQueue((prev) =>
+          prev.map((q) => (q.id === item.id ? { ...q, progress: 45 } : q))
+        );
 
-      const ext = file.name.split(".").pop()?.toLowerCase() || "unknown";
-      const tMeta = performance.now();
-      console.log(`[UploadTiming] [UploadCenter] saveUploadMetadata START`);
-      const result = await saveUploadMetadata({
-        fileName: file.name,
-        fileUrl: publicUrl,
-        fileType: ext,
-        fileSize: file.size,
-        subjectId: selectedSubjectId || undefined,
-      });
-      console.log(`[UploadTiming] [UploadCenter] saveUploadMetadata END in ${(performance.now() - tMeta).toFixed(0)}ms`);
-      setProgress(90);
+        // Upload to Supabase Storage
+        const { error: storageErr } = await supabase.storage
+          .from("documents")
+          .upload(filePath, item.file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+        if (storageErr) throw storageErr;
 
-      // Intelligent AI trigger decision (Phase 2.2)
-      if (result?.success && result?.documentId) {
-        const classification = classifyFile(file.name);
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === item.id ? { ...q, progress: 80, status: "classifying" } : q
+          )
+        );
 
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+        // Save metadata & classify
+        const result = await saveUploadMetadata({
+          fileName: item.name,
+          fileUrl: publicUrl,
+          fileType: item.type,
+          fileSize: item.size,
+          subjectId: selectedSubjectId || undefined,
+        });
+
+        if (!result?.success || !result?.documentId) {
+          throw new Error("Failed to save document metadata.");
+        }
+
+        const isNeedsReview = result.classificationStatus === "needs_review";
+        const destinationSubject = result.subjectName || null;
+        const destinationFolder = result.labSubfolderName || result.folderName || null;
+
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === item.id
+              ? {
+                  ...q,
+                  progress: 100,
+                  status: isNeedsReview ? "needs_review" : "success",
+                  documentId: result.documentId,
+                  destinationSubject,
+                  destinationFolder,
+                }
+              : q
+          )
+        );
+
+        // AI study pack dispatch check
+        const classification = classifyFile(item.name);
         const fireStudyPack = async () => {
-          console.log(`[UploadTiming] [UploadCenter] Dispatching /api/generate-study-pack`);
           try {
             await fetch("/api/generate-study-pack", {
               method: "POST",
@@ -290,384 +510,438 @@ function UploadArea({
               body: JSON.stringify({
                 documentId: result.documentId,
                 fileUrl: publicUrl,
-                fileType: ext,
+                fileType: item.type,
               }),
             });
-            console.log(`[UploadTiming] [UploadCenter] /api/generate-study-pack response received`);
           } catch (err) {
             console.warn("Failed to fire study pack generation", err);
           }
         };
 
-        if (classification.category === "skip") {
-          console.log(`[AI Trigger] Skipped administrative document: ${file.name}`);
-        } else if (classification.category === "auto") {
+        if (classification.category === "auto") {
           const isLectures = classification.label.toLowerCase().includes("lecture");
           const isNotes = classification.label.toLowerCase().includes("note");
-          const isPresentations = classification.label.toLowerCase().includes("presentation") || 
-                                  classification.label.toLowerCase().includes("slide");
+          const isPresentations =
+            classification.label.toLowerCase().includes("presentation") ||
+            classification.label.toLowerCase().includes("slide");
 
-          const isEnabled = 
+          const isEnabled =
             (isLectures && settings.aiAutoLectures) ||
             (isNotes && settings.aiAutoNotes) ||
             (isPresentations && settings.aiAutoPresentations) ||
-            (!isLectures && !isNotes && !isPresentations); // Safe fallback if label differs
+            (!isLectures && !isNotes && !isPresentations);
 
           if (isEnabled) {
-            await fireStudyPack();
-          } else {
-            console.log(`[AI Trigger] Skipped auto-generation due to preferences: ${file.name}`);
+            fireStudyPack();
           }
         } else if (classification.category === "confirm") {
-          const isAssignment = classification.label.toLowerCase().includes("assignment") ||
-                               classification.label.toLowerCase().includes("homework");
+          const isAssignment =
+            classification.label.toLowerCase().includes("assignment") ||
+            classification.label.toLowerCase().includes("homework");
           const isQuiz = classification.label.toLowerCase().includes("quiz");
           const isProject = classification.label.toLowerCase().includes("project");
           const isLab = classification.label.toLowerCase().includes("lab");
-          const isPastPaper = classification.label.toLowerCase().includes("past paper") || 
-                              classification.label.toLowerCase().includes("exam");
+          const isPastPaper =
+            classification.label.toLowerCase().includes("past paper") ||
+            classification.label.toLowerCase().includes("exam");
 
-          const autoAssess = (isAssignment && settings.aiAutoAssignments) ||
-                             (isQuiz && settings.aiAutoQuizzes) ||
-                             (isProject && settings.aiAutoProjects) ||
-                             (isLab && settings.aiAutoLabs) ||
-                             (isPastPaper && settings.aiAutoPastPapers);
+          const autoAssess =
+            (isAssignment && settings.aiAutoAssignments) ||
+            (isQuiz && settings.aiAutoQuizzes) ||
+            (isProject && settings.aiAutoProjects) ||
+            (isLab && settings.aiAutoLabs) ||
+            (isPastPaper && settings.aiAutoPastPapers);
 
           const remembered = settings.aiAssessmentRememberedChoice;
 
           if (autoAssess || remembered === "generate") {
-            await fireStudyPack();
-          } else if (remembered === "skip") {
-            console.log(`[AI Trigger] Skipped assessment file by remembered preference: ${file.name}`);
-          } else {
+            fireStudyPack();
+          } else if (remembered !== "skip") {
             setPendingDoc({
               documentId: result.documentId,
               fileUrl: publicUrl,
-              fileType: ext,
-              fileName: file.name,
+              fileType: item.type,
+              fileName: item.name,
               fileTypeLabel: classification.label,
             });
             setShowConfirm(true);
           }
         }
-      }
 
-      setProgress(100);
-      setStatus("success");
-
-      setTimeout(() => {
-        setFile(null);
-        setStatus("idle");
-        setProgress(0);
-        setSelectedSubjectId("");
         onUploadComplete();
-      }, 2000);
-    } catch (err: unknown) {
-      console.error("Upload failed", err);
-      setStatus("error");
-      setErrorMsg(
-        err instanceof Error ? err.message : "Upload failed. Please try again."
-      );
-    }
-  };
-
-  const fireStudyPackGeneration = async (documentId: string, fileUrl: string, fileType: string) => {
-    try {
-      await fetch("/api/generate-study-pack", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        keepalive: true,
-        body: JSON.stringify({ documentId, fileUrl, fileType }),
-      });
-    } catch (err) {
-      console.warn("Failed to fire study pack generation", err);
-    }
-  };
-
-  const handleConfirmGenerate = (remember: boolean) => {
-    if (pendingDoc) {
-      fireStudyPackGeneration(pendingDoc.documentId, pendingDoc.fileUrl, pendingDoc.fileType);
-      if (remember) {
-        settings.updateSetting("aiAssessmentRememberedChoice", "generate");
+      } catch (err: unknown) {
+        console.error(`Upload failed for ${item.name}:`, err);
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === item.id
+              ? {
+                  ...q,
+                  status: "error",
+                  errorMsg:
+                    err instanceof Error
+                      ? err.message
+                      : "Upload failed. Please try again.",
+                }
+              : q
+          )
+        );
       }
+    },
+    [selectedSubjectId, settings, onUploadComplete]
+  );
+
+  // Queue Processor: Runs up to 2 concurrent uploads
+  useEffect(() => {
+    const activeUploads = queue.filter(
+      (q) => q.status === "uploading" || q.status === "classifying"
+    );
+    const waitingItems = queue.filter((q) => q.status === "waiting");
+
+    if (activeUploads.length < 2 && waitingItems.length > 0) {
+      const nextItem = waitingItems[0];
+      uploadItem(nextItem);
     }
-    setShowConfirm(false);
-    setPendingDoc(null);
+  }, [queue, uploadItem]);
+
+  const handleCancelItem = (itemId: string) => {
+    setQueue((prev) => {
+      const target = prev.find((q) => q.id === itemId);
+      if (target?.abortController) {
+        target.abortController.abort();
+      }
+      return prev.filter((q) => q.id !== itemId);
+    });
   };
 
-  const handleConfirmSkip = (remember: boolean) => {
-    if (remember) {
-      settings.updateSetting("aiAssessmentRememberedChoice", "skip");
-    }
-    setShowConfirm(false);
-    setPendingDoc(null);
+  const handleRetryItem = (itemId: string) => {
+    setQueue((prev) =>
+      prev.map((q) =>
+        q.id === itemId
+          ? { ...q, status: "waiting", progress: 0, errorMsg: undefined }
+          : q
+      )
+    );
   };
 
-  const handleConfirmCancel = () => {
-    setShowConfirm(false);
-    setPendingDoc(null);
+  const handleClearCompleted = () => {
+    setQueue((prev) =>
+      prev.filter((q) => q.status !== "success" && q.status !== "needs_review")
+    );
   };
 
-  const reset = () => {
-    setFile(null);
-    setStatus("idle");
-    setProgress(0);
-    setErrorMsg("");
-  };
-
+  const hasCompletedItems = queue.some(
+    (q) => q.status === "success" || q.status === "needs_review"
+  );
+  const activeCount = queue.filter(
+    (q) => q.status === "waiting" || q.status === "uploading" || q.status === "classifying"
+  ).length;
 
   return (
-    <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm overflow-hidden">
-      {/* Card header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-border/40">
-        <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-          <CloudUpload className="h-4.5 w-4.5 text-primary" />
-        </div>
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">
-            Upload Academic Material
-          </h2>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            PDF · DOCX · PPTX · TXT · Images &nbsp;·&nbsp; Max 50 MB per file
-          </p>
+    <div
+      ref={dropZoneRef}
+      className="rounded-xl border border-border/60 bg-card/60 shadow-sm overflow-hidden"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/40 bg-muted/20">
+        <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <span>Upload Academic Material</span>
+          {activeCount > 0 && (
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+              {activeCount} uploading
+            </span>
+          )}
+        </h2>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>PDF · DOCX · PPTX · TXT · Images</span>
+          <span className="text-border">•</span>
+          <span>Max 50 MB per file</span>
         </div>
       </div>
 
-      <div className="p-6 flex flex-col gap-5">
-        {/* Drop zone — only visible when no file is selected */}
-        {status === "idle" && (
+      <div className="p-5 flex flex-col gap-4">
+        {/* Optional Subject Assignment */}
+        {subjects.length > 0 && (
+          <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-muted/30 border border-border/40 text-xs">
+            <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+              <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="font-medium text-foreground">Destination:</span>
+              <span className="truncate text-muted-foreground">
+                {selectedSubjectId
+                  ? subjects.find((s) => s.id === selectedSubjectId)?.name
+                  : "Automatic intelligent routing"}
+              </span>
+            </div>
+            <select
+              value={selectedSubjectId}
+              onChange={(e) => setSelectedSubjectId(e.target.value)}
+              className="rounded-md border border-border/60 bg-background text-foreground text-xs px-2.5 py-1 outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer shrink-0 max-w-[200px]"
+            >
+              <option value="">Auto-classify (Recommended)</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} {s.code ? `(${s.code})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Validation Errors Banner */}
+        {validationErrors.length > 0 && (
+          <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold flex items-center gap-1.5">
+                <AlertCircle className="h-4 w-4" />
+                Upload Notice
+              </span>
+              <button
+                type="button"
+                onClick={() => setValidationErrors([])}
+                className="text-xs hover:underline cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+            {validationErrors.map((err, i) => (
+              <p key={i} className="text-[11px] pl-5">
+                • {err}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {/* Main Drop Zone */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragging(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+          }}
+          onDrop={onDrop}
+          onClick={() => inputRef.current?.click()}
+          className={cn(
+            "border-2 border-dashed rounded-lg flex flex-col items-center justify-center py-7 px-4 text-center cursor-pointer transition-all duration-150 group",
+            isDragging
+              ? "border-primary bg-primary/5 shadow-inner"
+              : "border-border/60 hover:border-primary/50 hover:bg-muted/30"
+          )}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".pdf,.docx,.pptx,.txt,.jpg,.jpeg,.png,.webp"
+            onChange={(e) => {
+              if (e.target.files) handleFiles(e.target.files);
+              if (inputRef.current) inputRef.current.value = "";
+            }}
+          />
           <div
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
-            onDrop={onDrop}
-            onClick={() => inputRef.current?.click()}
             className={cn(
-              "border-2 border-dashed rounded-xl flex flex-col items-center justify-center py-12 px-6 text-center cursor-pointer transition-all duration-200 group",
+              "h-10 w-10 rounded-lg border flex items-center justify-center mb-2.5 transition-colors",
               isDragging
-                ? "border-primary bg-primary/5"
-                : "border-border/60 hover:border-primary/40 hover:bg-primary/[0.02]"
+                ? "bg-primary/10 border-primary/30 text-primary scale-105"
+                : "bg-secondary/60 border-border/40 text-muted-foreground group-hover:text-primary group-hover:bg-primary/10"
             )}
           >
-            <input
-              ref={inputRef}
-              type="file"
-              className="hidden"
-              accept=".pdf,.docx,.pptx,.txt,.jpg,.jpeg,.png,.webp"
-              onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-            />
-            <div
-              className={cn(
-                "h-14 w-14 rounded-2xl border flex items-center justify-center mb-4 transition-all duration-200",
-                isDragging
-                  ? "bg-primary/15 border-primary/30 text-primary"
-                  : "bg-secondary/80 border-border/40 text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 group-hover:border-primary/20"
-              )}
-            >
-              <Upload className="h-6 w-6" />
-            </div>
-            <p className="text-sm font-semibold text-foreground mb-1">
-              {isDragging ? "Drop to upload" : "Drag & drop files here"}
-            </p>
-            <p className="text-xs text-muted-foreground mb-4">
-              or click anywhere in this area to browse
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {["PDF", "DOCX", "PPTX", "TXT", "Images"].map((t) => (
-                <span
-                  key={t}
-                  className="px-2 py-0.5 rounded-md bg-secondary/80 border border-border/40 text-[10px] font-semibold text-muted-foreground"
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
+            <Upload className="h-5 w-5" />
           </div>
-        )}
-
-        {/* Error banner when no file is selected */}
-        {status === "error" && !file && (
-          <div>
-            <div className="flex items-center gap-2 text-destructive text-xs bg-destructive/5 p-3 rounded-xl border border-destructive/15 mb-3">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-            {/* Show drop zone again so user can retry */}
-            <div
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
-              onDrop={onDrop}
-              onClick={() => inputRef.current?.click()}
-              className="border-2 border-dashed border-border/60 hover:border-primary/40 rounded-xl flex flex-col items-center justify-center py-8 px-6 text-center cursor-pointer transition-all duration-200"
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                className="hidden"
-                accept=".pdf,.docx,.pptx,.txt,.jpg,.jpeg,.png,.webp"
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-              />
-              <Upload className="h-5 w-5 text-muted-foreground mb-2" />
-              <p className="text-xs font-medium text-muted-foreground">Click to try again</p>
-            </div>
+          <p className="text-xs font-semibold text-foreground mb-0.5">
+            {isDragging ? "Drop files to upload" : "Drop files here or click to browse"}
+          </p>
+          <p className="text-[11px] text-muted-foreground mb-2.5">
+            Select one or multiple files to upload simultaneously
+          </p>
+          <div className="flex items-center gap-1.5">
+            {["PDF", "DOCX", "PPTX", "TXT", "Images"].map((fmt) => (
+              <span
+                key={fmt}
+                className="px-2 py-0.5 rounded text-[10px] font-medium bg-secondary/80 text-muted-foreground border border-border/40"
+              >
+                {fmt}
+              </span>
+            ))}
           </div>
-        )}
+        </div>
 
-        {/* File preview + upload controls */}
-        {file && (
-          <div className="rounded-xl border border-border/70 bg-background/60 p-4 space-y-4">
-            {/* File info */}
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 rounded-lg bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0">
-                {getFileIcon(
-                  file.name.split(".").pop(),
-                  "h-5 w-5"
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p
-                  className="text-sm font-semibold text-foreground truncate"
-                  title={file.name}
-                >
-                  {file.name}
-                </p>
-                <div className="flex items-center gap-3 mt-0.5">
-                  <span className="text-[10px] text-muted-foreground font-medium">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </span>
-                  <span className="text-[10px] text-muted-foreground uppercase font-semibold bg-secondary/70 px-1.5 py-0.5 rounded-md border border-border/30">
-                    {file.name.split(".").pop()?.toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              {status === "selected" && (
+        {/* Upload Queue */}
+        {queue.length > 0 && (
+          <div className="flex flex-col gap-2 pt-2 border-t border-border/30">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-foreground flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                Upload Queue ({queue.length})
+              </span>
+              {hasCompletedItems && (
                 <button
-                  onClick={reset}
-                  className="p-1 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                  type="button"
+                  onClick={handleClearCompleted}
+                  className="text-[11px] text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
                 >
-                  <X className="h-4 w-4" />
+                  Clear completed
                 </button>
               )}
             </div>
 
-            {/* Subject selector */}
-            {status === "selected" && subjects.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                  Assign to Subject (optional)
-                </label>
-                <select
-                  value={selectedSubjectId}
-                  onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="w-full rounded-lg border border-border/60 bg-secondary/50 text-foreground text-xs px-3 py-2 outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-colors cursor-pointer"
+            <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
+              {queue.map((item) => (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "p-3 rounded-lg border text-xs transition-all duration-150 flex flex-col gap-2",
+                    item.status === "success"
+                      ? "bg-emerald-500/[0.04] border-emerald-500/20"
+                      : item.status === "needs_review"
+                      ? "bg-amber-500/[0.04] border-amber-500/20"
+                      : item.status === "error"
+                      ? "bg-destructive/[0.04] border-destructive/20"
+                      : "bg-background/80 border-border/60"
+                  )}
                 >
-                  <option value="">Let AI classify automatically</option>
-                  {subjects.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}{s.code ? ` (${s.code})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-muted-foreground">
-                  AI will auto-classify if no subject is selected.
-                </p>
-              </div>
-            )}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-7 w-7 rounded-md bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0">
+                        {getFileIcon(item.type, "h-3.5 w-3.5")}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground truncate" title={item.name}>
+                          {item.name}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatFileSize(item.size)}
+                        </p>
+                      </div>
+                    </div>
 
-            {/* Error during upload */}
-            {status === "error" && (
-              <div className="flex items-center gap-2 text-destructive text-xs bg-destructive/5 p-3 rounded-lg border border-destructive/15">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {item.status === "waiting" && (
+                        <span className="text-[10px] text-muted-foreground font-medium bg-secondary px-2 py-0.5 rounded">
+                          Waiting…
+                        </span>
+                      )}
 
-            {/* Success message */}
-            {status === "success" && (
-              <div className="flex items-center gap-2 text-emerald-400 text-xs bg-emerald-500/5 p-3 rounded-lg border border-emerald-500/15">
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                <span>Upload complete! File organized and saved successfully.</span>
-              </div>
-            )}
+                      {item.status === "uploading" && (
+                        <span className="text-[10px] text-primary font-medium flex items-center gap-1">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Uploading {item.progress}%
+                        </span>
+                      )}
 
-            {/* Progress bar */}
-            {(status === "uploading" || status === "success") && (
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-[10px] font-semibold text-muted-foreground">
-                  <div className="flex items-center gap-1.5">
-                    {status === "uploading" && (
-                      <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                    )}
-                    <span>
-                      {status === "success"
-                        ? "Finalizing upload…"
-                        : progress < 30
-                        ? "Preparing upload…"
-                        : progress < 75
-                        ? "Uploading securely…"
-                        : "Saving metadata…"}
-                    </span>
+                      {item.status === "classifying" && (
+                        <span className="text-[10px] text-primary font-medium flex items-center gap-1">
+                          <Sparkles className="h-3 w-3 animate-pulse" />
+                          Checking location…
+                        </span>
+                      )}
+
+                      {item.status === "success" && (
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                          <Check className="h-3 w-3" />
+                          {item.destinationSubject
+                            ? `Saved to: ${item.destinationSubject}${
+                                item.destinationFolder ? ` › ${item.destinationFolder}` : ""
+                              }`
+                            : "Saved"}
+                        </span>
+                      )}
+
+                      {item.status === "needs_review" && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          Needs confirmation
+                        </span>
+                      )}
+
+                      {item.status === "error" && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-destructive font-medium">
+                            Failed
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => handleRetryItem(item.id)}
+                            title="Retry upload"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-pointer"
+                          >
+                            <RotateCw className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleCancelItem(item.id)}
+                        className="p-1 text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors cursor-pointer"
+                        title={item.status === "uploading" ? "Cancel upload" : "Remove"}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <span className="tabular-nums">{progress}%</span>
-                </div>
-                <Progress value={progress} className="h-1.5 bg-secondary" />
-              </div>
-            )}
 
-            {/* Action buttons */}
-            {(status === "selected" || status === "error") && (
-              <div className="flex items-center justify-end gap-2 pt-1 border-t border-border/20">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={reset}
-                  className="text-xs h-8 text-muted-foreground cursor-pointer"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleUpload}
-                  className="text-xs h-8 min-w-[110px] cursor-pointer gap-1.5"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  Upload File
-                </Button>
-              </div>
-            )}
+                  {(item.status === "uploading" || item.status === "classifying") && (
+                    <Progress value={item.progress} className="h-1 bg-secondary" />
+                  )}
+
+                  {item.status === "error" && item.errorMsg && (
+                    <p className="text-[10px] text-destructive mt-0.5">
+                      {item.errorMsg}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
-
-        {/* Info strip */}
-        <div className="flex flex-wrap items-center gap-4 text-[11px] text-muted-foreground border-t border-border/30 pt-4">
-          <div className="flex items-center gap-1.5">
-            <HardDrive className="h-3.5 w-3.5" />
-            <span>Max 50 MB per file</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Info className="h-3.5 w-3.5" />
-            <span>Files are processed by AI for summaries & quizzes</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <FolderOpen className="h-3.5 w-3.5" />
-            <span>Uploads appear in your history below</span>
-          </div>
-        </div>
       </div>
 
       <AIStudyPackDialog
         open={showConfirm}
         fileName={pendingDoc?.fileName || ""}
         fileTypeLabel={pendingDoc?.fileTypeLabel || ""}
-        onGenerate={handleConfirmGenerate}
-        onSkip={handleConfirmSkip}
-        onCancel={handleConfirmCancel}
+        onGenerate={(remember) => {
+          if (pendingDoc) {
+            fetch("/api/generate-study-pack", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              keepalive: true,
+              body: JSON.stringify({
+                documentId: pendingDoc.documentId,
+                fileUrl: pendingDoc.fileUrl,
+                fileType: pendingDoc.fileType,
+              }),
+            }).catch((err) => console.warn("Failed study pack fire", err));
+
+            if (remember) {
+              settings.updateSetting("aiAssessmentRememberedChoice", "generate");
+            }
+          }
+          setShowConfirm(false);
+          setPendingDoc(null);
+        }}
+        onSkip={(remember) => {
+          if (remember) {
+            settings.updateSetting("aiAssessmentRememberedChoice", "skip");
+          }
+          setShowConfirm(false);
+          setPendingDoc(null);
+        }}
+        onCancel={() => {
+          setShowConfirm(false);
+          setPendingDoc(null);
+        }}
       />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// File Detail Panel (inline slide-in)
+// Phase 3: Lightweight File Preview Panel (Visual Preview + Structured Metadata)
 // ---------------------------------------------------------------------------
 
 function FileDetailPanel({
@@ -685,127 +959,191 @@ function FileDetailPanel({
 }) {
   const subject = subjects.find((s) => s.id === doc.subject_id);
   const fileSize = doc.uploads?.file_size;
+  const isImage = isImageType(doc.file_type);
+  const isPdf = (doc.file_type || "").toLowerCase() === "pdf";
+
+  // Handle escape key to close preview
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card/70 backdrop-blur-sm p-5 space-y-4">
+    <div
+      aria-label={`File preview for ${doc.title}`}
+      className="rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm p-4 space-y-3.5 animate-in fade-in duration-200"
+    >
       {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="h-10 w-10 rounded-lg bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0">
-            {getFileIcon(doc.file_type, "h-5 w-5")}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="h-8 w-8 rounded-lg bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0">
+            {getFileIcon(doc.file_type, "h-4 w-4")}
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground truncate" title={doc.title}>
+            <p
+              className="text-xs font-semibold text-foreground truncate"
+              title={doc.title}
+            >
               {doc.title}
             </p>
-            <p className="text-[10px] text-muted-foreground uppercase font-semibold mt-0.5">
+            <p className="text-[10px] text-muted-foreground uppercase font-medium">
               {doc.file_type?.toUpperCase() || "File"}
             </p>
           </div>
         </div>
         <button
+          type="button"
           onClick={onClose}
-          className="p-1.5 hover:bg-secondary rounded-lg text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          aria-label="Close file preview"
+          className="p-1 hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
         >
-          <X className="h-4 w-4" />
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {/* Details grid */}
-      <div className="grid grid-cols-2 gap-3">
-        {[
-          {
-            icon: <Calendar className="h-3.5 w-3.5" />,
-            label: "Upload Date",
-            value: formatDate(doc.created_at),
-          },
-          {
-            icon: <HardDrive className="h-3.5 w-3.5" />,
-            label: "File Size",
-            value: formatFileSize(fileSize),
-          },
-          {
-            icon: <Tag className="h-3.5 w-3.5" />,
-            label: "Subject",
-            value: subject?.name || doc.ai_subject || "Unclassified",
-          },
-          {
-            icon: <Info className="h-3.5 w-3.5" />,
-            label: "AI Status",
-            value:
-              doc.summary_status === "completed"
-                ? "Processed"
-                : doc.summary_status === "processing"
-                ? "Processing…"
-                : doc.summary_status === "failed"
-                ? "Failed"
-                : "Pending",
-          },
-        ].map((row) => (
-          <div
-            key={row.label}
-            className="bg-secondary/40 rounded-lg px-3 py-2.5 border border-border/30"
-          >
-            <div className="flex items-center gap-1.5 text-muted-foreground mb-1">
-              {row.icon}
-              <span className="text-[10px] font-semibold uppercase tracking-wide">
-                {row.label}
-              </span>
+      {/* Lightweight Visual File Preview */}
+      {doc.file_url && (
+        <div className="rounded-lg overflow-hidden border border-border/40 bg-muted/30">
+          {isImage ? (
+            <div className="relative w-full h-36 bg-black/5 flex items-center justify-center overflow-hidden">
+              <img
+                src={doc.file_url}
+                alt={doc.title}
+                className="max-h-full max-w-full object-contain"
+                loading="lazy"
+              />
             </div>
-            <p className="text-xs font-semibold text-foreground truncate">
-              {row.value}
-            </p>
+          ) : isPdf ? (
+            <div className="relative w-full h-36 bg-muted/40 flex flex-col items-center justify-center p-3 text-center">
+              <FileText className="h-8 w-8 text-red-500 mb-1.5" />
+              <p className="text-[11px] font-medium text-foreground truncate max-w-full">
+                PDF Document
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-[11px] h-6 px-2.5 mt-2 gap-1 cursor-pointer"
+                onClick={() => window.open(doc.file_url!, "_blank", "noopener,noreferrer")}
+              >
+                <Eye className="h-3 w-3" />
+                View Full PDF
+              </Button>
+            </div>
+          ) : (
+            <div className="relative w-full h-24 bg-muted/40 flex flex-col items-center justify-center p-3 text-center">
+              <div className="h-8 w-8 rounded-md bg-secondary/80 flex items-center justify-center mb-1">
+                {getFileIcon(doc.file_type, "h-4 w-4")}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Document preview available on download
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Structured Details Grid */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
+          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
+            <Calendar className="h-3 w-3" />
+            <span className="text-[9px] font-medium uppercase">Date</span>
           </div>
-        ))}
+          <p className="text-[11px] font-medium text-foreground truncate">
+            {formatDate(doc.created_at)}
+          </p>
+        </div>
+
+        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
+          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
+            <HardDrive className="h-3 w-3" />
+            <span className="text-[9px] font-medium uppercase">Size</span>
+          </div>
+          <p className="text-[11px] font-medium text-foreground truncate">
+            {formatFileSize(fileSize)}
+          </p>
+        </div>
+
+        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
+          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
+            <Tag className="h-3 w-3" />
+            <span className="text-[9px] font-medium uppercase">Subject</span>
+          </div>
+          <p className="text-[11px] font-medium text-foreground truncate">
+            {subject?.name || doc.ai_subject || "Unassigned"}
+          </p>
+        </div>
+
+        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
+          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
+            <Folder className="h-3 w-3" />
+            <span className="text-[9px] font-medium uppercase">Folder</span>
+          </div>
+          <p className="text-[11px] font-medium text-foreground truncate">
+            {doc.ai_topic || "Lectures"}
+          </p>
+        </div>
       </div>
 
-      {/* Actions */}
-      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/30">
+      {/* Processing Status Banner */}
+      <div className="p-2 rounded-lg bg-secondary/40 border border-border/30 flex items-center justify-between text-xs">
+        <span className="text-[11px] text-muted-foreground">Status</span>
+        <div>{getStatusBadge(doc.summary_status, doc.quiz_status, doc.classification_status)}</div>
+      </div>
+
+      {/* Action Shortcuts */}
+      <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-border/30">
         <Button
           variant="outline"
           size="sm"
-          className="text-xs h-8 cursor-pointer gap-1.5"
+          className="text-xs h-7 cursor-pointer gap-1"
           onClick={() => doc.file_url && window.open(doc.file_url, "_blank")}
           disabled={!doc.file_url}
         >
-          <ExternalLink className="h-3.5 w-3.5" />
+          <ExternalLink className="h-3 w-3" />
           Open File
         </Button>
         <Button
           variant="outline"
           size="sm"
-          className="text-xs h-8 cursor-pointer gap-1.5"
+          className="text-xs h-7 cursor-pointer gap-1"
           onClick={() => onNavigate(`/assistant?documentId=${doc.id}`)}
         >
-          <BrainCircuit className="h-3.5 w-3.5" />
-          Study with AI
+          <BrainCircuit className="h-3 w-3" />
+          Study AI
         </Button>
         <Button
           variant="outline"
           size="sm"
-          className="text-xs h-8 cursor-pointer gap-1.5"
+          className="text-xs h-7 cursor-pointer gap-1"
           onClick={() => onNavigate(`/uploads/${doc.id}/summary`)}
         >
-          <ScrollText className="h-3.5 w-3.5" />
+          <ScrollText className="h-3 w-3" />
           Summary
         </Button>
         <Button
           variant="outline"
           size="sm"
-          className="text-xs h-8 cursor-pointer gap-1.5"
+          className="text-xs h-7 cursor-pointer gap-1"
           onClick={() => onNavigate(`/uploads/${doc.id}/quiz`)}
         >
-          <HelpCircle className="h-3.5 w-3.5" />
+          <HelpCircle className="h-3 w-3" />
           Quiz
         </Button>
       </div>
+
       <Button
         variant="ghost"
         size="sm"
-        className="w-full text-xs h-8 text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer gap-1.5"
+        className="w-full text-xs h-7 text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer gap-1"
         onClick={() => onDelete(doc.id)}
       >
-        <Trash2 className="h-3.5 w-3.5" />
+        <Trash2 className="h-3 w-3" />
         Move to Recycle Bin
       </Button>
     </div>
@@ -813,33 +1151,33 @@ function FileDetailPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Upload History Table (Section 2)
+// Phase 3: Upload History Section (Enhanced Search, Filters, Rows & Empty States)
 // ---------------------------------------------------------------------------
 
-const FILTER_TABS: { key: FilterKey; label: string }[] = [
+const FORMAT_TABS: { key: FormatFilterKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "pdf", label: "PDF" },
   { key: "docx", label: "DOCX" },
   { key: "pptx", label: "PPTX" },
   { key: "txt", label: "TXT" },
   { key: "image", label: "Images" },
-  { key: "completed", label: "Completed" },
-  { key: "processing", label: "Processing" },
-  { key: "failed", label: "Failed" },
 ];
 
 function UploadHistorySection({
   documents,
   subjects,
+  onUploadClick,
 }: {
   documents: DocumentRow[];
   subjects: SubjectItem[];
+  onUploadClick: () => void;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [formatFilter, setFormatFilter] = useState<FormatFilterKey>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
@@ -853,37 +1191,62 @@ function UploadHistorySection({
     return m;
   }, [subjects]);
 
-  // Filter
+  // Filter logic
   const filtered = useMemo(() => {
     return documents.filter((d) => {
-      // Search
+      // Search by title or subject or topic
       if (search) {
         const q = search.toLowerCase();
-        const subName = d.subject_id ? (subjectMap.get(d.subject_id) || "") : (d.ai_subject || "");
+        const subName = d.subject_id
+          ? subjectMap.get(d.subject_id) || ""
+          : d.ai_subject || "";
+        const topicName = d.ai_topic || "";
         if (
           !d.title.toLowerCase().includes(q) &&
           !subName.toLowerCase().includes(q) &&
+          !topicName.toLowerCase().includes(q) &&
           !(d.file_type || "").toLowerCase().includes(q)
         )
           return false;
       }
 
-      // Type/status filter
-      if (filter === "image") return isImageType(d.file_type);
-      if (filter === "completed")
-        return d.summary_status === "completed" || d.quiz_status === "completed";
-      if (filter === "processing")
-        return d.summary_status === "processing" || d.quiz_status === "processing";
-      if (filter === "failed")
-        return d.summary_status === "failed" || d.quiz_status === "failed";
-      if (filter !== "all")
-        return (d.file_type || "").toLowerCase() === filter;
+      // Format filter
+      if (formatFilter === "image") {
+        if (!isImageType(d.file_type)) return false;
+      } else if (formatFilter !== "all") {
+        if ((d.file_type || "").toLowerCase() !== formatFilter) return false;
+      }
+
+      // Status filter
+      if (statusFilter === "completed") {
+        const isCompleted =
+          (d.summary_status === "completed" ||
+            d.summary_status === "pending" ||
+            d.summary_status === null) &&
+          d.quiz_status !== "processing" &&
+          d.quiz_status !== "failed" &&
+          d.classification_status !== "needs_review";
+        if (!isCompleted) return false;
+      } else if (statusFilter === "processing") {
+        const isProcessing =
+          d.summary_status === "processing" || d.quiz_status === "processing";
+        if (!isProcessing) return false;
+      } else if (statusFilter === "needs_review") {
+        const isNeedsReview =
+          d.classification_status === "needs_review" ||
+          d.classification_status === "pending";
+        if (!isNeedsReview) return false;
+      } else if (statusFilter === "failed") {
+        const isFailed =
+          d.summary_status === "failed" || d.quiz_status === "failed";
+        if (!isFailed) return false;
+      }
 
       return true;
     });
-  }, [documents, search, filter, subjectMap]);
+  }, [documents, search, formatFilter, statusFilter, subjectMap]);
 
-  // Sort
+  // Sort logic
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
       let cmp = 0;
@@ -891,8 +1254,6 @@ function UploadHistorySection({
       else if (sortKey === "date")
         cmp =
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      else if (sortKey === "size")
-        cmp = (a.uploads?.file_size || 0) - (b.uploads?.file_size || 0);
       else if (sortKey === "type")
         cmp = (a.file_type || "").localeCompare(b.file_type || "");
       else if (sortKey === "subject") {
@@ -923,11 +1284,6 @@ function UploadHistorySection({
     setPage(1);
   };
 
-  const handleFilter = (key: FilterKey) => {
-    setFilter(key);
-    setPage(1);
-  };
-
   const handleDelete = useCallback(
     async (docId: string) => {
       setDeletingId(docId);
@@ -948,10 +1304,21 @@ function UploadHistorySection({
     router.push(path);
   };
 
-  const renderSortHeader = (sortKeyVal: SortKey, label: string, className?: string) => (
+  const handleResetFilters = () => {
+    setSearch("");
+    setFormatFilter("all");
+    setStatusFilter("all");
+    setPage(1);
+  };
+
+  const renderSortHeader = (
+    sortKeyVal: SortKey,
+    label: string,
+    className?: string
+  ) => (
     <th
       className={cn(
-        "px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors",
+        "px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors",
         className
       )}
       onClick={() => handleSort(sortKeyVal)}
@@ -965,7 +1332,7 @@ function UploadHistorySection({
             <ChevronDown className="h-3 w-3 text-primary" />
           )
         ) : (
-          <ChevronUp className="h-3 w-3 text-muted-foreground/40" />
+          <ChevronUp className="h-3 w-3 text-muted-foreground/30" />
         )}
       </span>
     </th>
@@ -975,31 +1342,44 @@ function UploadHistorySection({
     ? documents.find((d) => d.id === detailDocId) ?? null
     : null;
 
+  const isFilteringActive =
+    search.trim() !== "" || formatFilter !== "all" || statusFilter !== "all";
+
   return (
-    <div className="flex flex-col gap-4">
-      {/* Section header */}
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3.5">
+      {/* Header & Search */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Upload History</h2>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
+          <h2 className="text-base font-semibold text-foreground">
+            Upload History
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
             {documents.length === 0
               ? "No uploads yet"
-              : `${documents.length} file${documents.length !== 1 ? "s" : ""} uploaded`}
+              : `${documents.length} file${
+                  documents.length !== 1 ? "s" : ""
+                } uploaded`}
           </p>
         </div>
+
         {/* Search */}
-        <div className="relative w-full max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             placeholder="Search files, subjects…"
             className="pl-8 h-8 text-xs bg-background/80 border-border/60"
           />
           {search && (
             <button
+              type="button"
               onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear search query"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <X className="h-3 w-3" />
             </button>
@@ -1007,69 +1387,183 @@ function UploadHistorySection({
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
-        {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => handleFilter(tab.key)}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all duration-150 cursor-pointer border",
-              filter === tab.key
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-secondary/50 text-muted-foreground border-border/50 hover:bg-secondary hover:text-foreground"
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-        {/* Result count badge */}
-        <span className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground bg-secondary/50 border border-border/40 px-2 py-1 rounded-md">
-          {sorted.length} result{sorted.length !== 1 ? "s" : ""}
-        </span>
+      {/* Filter Controls (Format Pills + Compact Filter Dropdown) */}
+      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-0.5">
+        <div className="flex items-center gap-1">
+          {FORMAT_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setFormatFilter(tab.key);
+                setPage(1);
+              }}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-all duration-150 cursor-pointer border",
+                formatFilter === tab.key
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-secondary/40 text-muted-foreground border-border/40 hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Status Filter Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "h-7 text-xs px-2.5 gap-1.5 cursor-pointer font-medium",
+                    statusFilter !== "all" && "border-primary text-primary bg-primary/5"
+                  )}
+                >
+                  <Filter className="h-3 w-3" />
+                  <span>
+                    {statusFilter === "all"
+                      ? "Filter"
+                      : statusFilter === "completed"
+                      ? "Completed"
+                      : statusFilter === "processing"
+                      ? "Processing"
+                      : statusFilter === "needs_review"
+                      ? "Needs Review"
+                      : "Failed"}
+                  </span>
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-36 bg-card">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase font-semibold">
+                  Status
+                </DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={statusFilter === "all"}
+                  onCheckedChange={() => {
+                    setStatusFilter("all");
+                    setPage(1);
+                  }}
+                  className="text-xs cursor-pointer"
+                >
+                  All Statuses
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={statusFilter === "completed"}
+                  onCheckedChange={() => {
+                    setStatusFilter("completed");
+                    setPage(1);
+                  }}
+                  className="text-xs cursor-pointer"
+                >
+                  Completed
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={statusFilter === "processing"}
+                  onCheckedChange={() => {
+                    setStatusFilter("processing");
+                    setPage(1);
+                  }}
+                  className="text-xs cursor-pointer"
+                >
+                  Processing
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={statusFilter === "needs_review"}
+                  onCheckedChange={() => {
+                    setStatusFilter("needs_review");
+                    setPage(1);
+                  }}
+                  className="text-xs cursor-pointer"
+                >
+                  Needs Review
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={statusFilter === "failed"}
+                  onCheckedChange={() => {
+                    setStatusFilter("failed");
+                    setPage(1);
+                  }}
+                  className="text-xs cursor-pointer"
+                >
+                  Failed
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Result Count */}
+          <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+            {sorted.length} {sorted.length === 1 ? "file" : "files"}
+          </span>
+        </div>
       </div>
 
-      {/* Empty State */}
+      {/* Empty States */}
       {documents.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center rounded-2xl border border-dashed border-border/50 bg-card/30">
-          <div className="h-16 w-16 rounded-2xl bg-secondary/60 border border-border/40 flex items-center justify-center mb-5">
-            <FolderOpen className="h-7 w-7 text-muted-foreground" />
+        <div className="flex flex-col items-center justify-center py-12 px-4 text-center rounded-xl border border-dashed border-border/60 bg-card/40">
+          <div className="h-12 w-12 rounded-xl bg-secondary/80 border border-border/40 flex items-center justify-center mb-3">
+            <FileText className="h-6 w-6 text-muted-foreground" />
           </div>
           <h3 className="text-sm font-semibold text-foreground mb-1">
-            No uploaded materials yet
+            No files uploaded yet
           </h3>
-          <p className="text-xs text-muted-foreground max-w-xs">
-            Upload your first lecture, notes, assignment, or study material
-            using the area above to begin.
+          <p className="text-xs text-muted-foreground max-w-sm mb-4">
+            Upload your lectures, notes, assignments, and other academic
+            material to get started.
           </p>
+          <Button
+            size="sm"
+            onClick={onUploadClick}
+            className="text-xs h-8 px-4 cursor-pointer gap-1.5 font-medium"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Upload Files
+          </Button>
         </div>
       ) : sorted.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center rounded-2xl border border-dashed border-border/50 bg-card/30">
-          <Search className="h-8 w-8 text-muted-foreground mb-3" />
-          <p className="text-sm font-semibold text-foreground mb-1">No results found</p>
-          <p className="text-xs text-muted-foreground">
-            Try adjusting your search or filter.
+        <div className="flex flex-col items-center justify-center py-10 px-4 text-center rounded-xl border border-dashed border-border/60 bg-card/40">
+          <Search className="h-7 w-7 text-muted-foreground mb-2" />
+          <p className="text-xs font-semibold text-foreground mb-0.5">
+            Nothing found
           </p>
+          <p className="text-[11px] text-muted-foreground mb-3">
+            Try another search or filter.
+          </p>
+          {isFilteringActive && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleResetFilters}
+              className="text-xs h-7 px-3 cursor-pointer"
+            >
+              Reset filters
+            </Button>
+          )}
         </div>
       ) : (
         <div className="flex gap-4">
-          {/* Table container */}
-          <div className="flex-1 min-w-0 rounded-xl border border-border/60 bg-card/50 overflow-hidden">
-            {/* Desktop table */}
+          {/* Table Container */}
+          <div className="flex-1 min-w-0 rounded-xl border border-border/60 bg-card/50 overflow-hidden shadow-sm">
+            {/* Desktop Table */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
-                <thead className="border-b border-border/50 bg-secondary/30">
+                <thead className="border-b border-border/50 bg-muted/30">
                   <tr>
-                    {renderSortHeader("name", "File Name", "min-w-[200px]")}
-                    {renderSortHeader("subject", "Subject", "min-w-[140px]")}
-                    {renderSortHeader("type", "Type", "min-w-[80px]")}
-                    {renderSortHeader("size", "Size", "min-w-[80px]")}
-                    {renderSortHeader("date", "Date", "min-w-[120px]")}
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground min-w-[110px]">
-                      Status
+                    {renderSortHeader("name", "FILE", "min-w-[220px]")}
+                    {renderSortHeader("subject", "SUBJECT", "min-w-[140px]")}
+                    {renderSortHeader("type", "TYPE", "w-20")}
+                    {renderSortHeader("date", "DATE", "min-w-[110px]")}
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground min-w-[100px]">
+                      STATUS
                     </th>
-                    <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16">
-                      Actions
+                    <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-muted-foreground w-16">
+                      ACTIONS
                     </th>
                   </tr>
                 </thead>
@@ -1088,80 +1582,100 @@ function UploadHistorySection({
                           "group transition-colors duration-100",
                           isSelected
                             ? "bg-primary/5"
-                            : "hover:bg-secondary/30"
+                            : "hover:bg-muted/30"
                         )}
                       >
-                        {/* File Name */}
-                        <td className="px-4 py-3">
+                        {/* File Name & Preview Trigger */}
+                        <td className="px-4 py-2.5">
                           <button
+                            type="button"
                             onClick={() =>
                               setDetailDocId(isSelected ? null : doc.id)
                             }
-                            className="flex items-center gap-2.5 text-left w-full group/name"
+                            aria-label={`Preview ${doc.title}`}
+                            className="flex items-center gap-2.5 text-left w-full group/name cursor-pointer"
                           >
-                            <div className="h-7 w-7 rounded-md bg-secondary/60 border border-border/30 flex items-center justify-center shrink-0">
+                            <div className="h-7 w-7 rounded-md bg-secondary/80 border border-border/30 flex items-center justify-center shrink-0">
                               {getFileIcon(doc.file_type)}
                             </div>
                             <span
-                              className="text-xs font-medium text-foreground truncate max-w-[160px] group-hover/name:text-primary transition-colors"
+                              className="text-xs font-medium text-foreground truncate max-w-[200px] group-hover/name:text-primary transition-colors"
                               title={doc.title}
                             >
                               {doc.title}
                             </span>
                           </button>
                         </td>
+
                         {/* Subject */}
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-2.5">
                           <span className="text-xs text-muted-foreground truncate max-w-[130px] block">
                             {subjectName || (
-                              <span className="italic opacity-60">Unclassified</span>
+                              <span className="italic opacity-60">Unassigned</span>
                             )}
                           </span>
                         </td>
+
                         {/* Type */}
-                        <td className="px-4 py-3">
-                          <span className="text-[10px] font-semibold uppercase text-muted-foreground bg-secondary/60 border border-border/30 px-1.5 py-0.5 rounded-md">
+                        <td className="px-4 py-2.5">
+                          <span className="text-[10px] font-semibold uppercase text-muted-foreground bg-secondary/70 border border-border/30 px-1.5 py-0.5 rounded">
                             {doc.file_type?.toUpperCase() || "—"}
                           </span>
                         </td>
-                        {/* Size */}
-                        <td className="px-4 py-3">
-                          <span className="text-xs text-muted-foreground tabular-nums">
-                            {formatFileSize(doc.uploads?.file_size)}
-                          </span>
-                        </td>
+
                         {/* Date */}
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-2.5">
                           <span className="text-xs text-muted-foreground whitespace-nowrap">
                             {formatDate(doc.created_at)}
                           </span>
                         </td>
+
                         {/* Status */}
-                        <td className="px-4 py-3">
-                          {getStatusBadge(doc.summary_status, doc.quiz_status)}
+                        <td className="px-4 py-2.5">
+                          {getStatusBadge(
+                            doc.summary_status,
+                            doc.quiz_status,
+                            doc.classification_status
+                          )}
                         </td>
+
                         {/* Actions */}
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-2.5 text-right">
                           {isDeleting ? (
                             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground ml-auto" />
                           ) : (
                             <DropdownMenu>
                               <DropdownMenuTrigger
                                 render={
-                                  <button className="h-7 w-7 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100">
+                                  <button
+                                    type="button"
+                                    aria-label={`Actions for ${doc.title}`}
+                                    className="h-7 w-7 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 ml-auto"
+                                  >
                                     <MoreHorizontal className="h-4 w-4" />
                                   </button>
                                 }
                               />
                               <DropdownMenuContent
                                 align="end"
-                                className="w-48 bg-card/95 border border-border/70 shadow-2xl backdrop-blur-md"
+                                className="w-44 bg-card/98 border border-border/70 shadow-lg"
                               >
+                                <DropdownMenuItem
+                                  className="text-xs cursor-pointer"
+                                  onClick={() => setDetailDocId(doc.id)}
+                                >
+                                  <Eye className="h-3.5 w-3.5 mr-2" />
+                                  Preview File
+                                </DropdownMenuItem>
                                 <DropdownMenuItem
                                   className="text-xs cursor-pointer"
                                   onClick={() =>
                                     doc.file_url &&
-                                    window.open(doc.file_url, "_blank", "noopener,noreferrer")
+                                    window.open(
+                                      doc.file_url,
+                                      "_blank",
+                                      "noopener,noreferrer"
+                                    )
                                   }
                                 >
                                   <ExternalLink className="h-3.5 w-3.5 mr-2" />
@@ -1196,7 +1710,7 @@ function UploadHistorySection({
                                   }
                                 >
                                   <ScrollText className="h-3.5 w-3.5 mr-2" />
-                                  Generate Summary
+                                  Summary
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   className="text-xs cursor-pointer"
@@ -1205,7 +1719,7 @@ function UploadHistorySection({
                                   }
                                 >
                                   <HelpCircle className="h-3.5 w-3.5 mr-2" />
-                                  Generate Quiz
+                                  Quiz
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
@@ -1226,33 +1740,46 @@ function UploadHistorySection({
               </table>
             </div>
 
-            {/* Mobile card list */}
+            {/* Mobile Card List */}
             <div className="md:hidden divide-y divide-border/30">
               {paginated.map((doc) => {
                 const subjectName = doc.subject_id
                   ? subjectMap.get(doc.subject_id)
                   : doc.ai_subject;
                 const isDeleting = deletingId === doc.id;
+                const isSelected = detailDocId === doc.id;
 
                 return (
-                  <div key={doc.id} className="p-4 flex items-start gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0">
-                      {getFileIcon(doc.file_type, "h-4.5 w-4.5")}
-                    </div>
+                  <div
+                    key={doc.id}
+                    className={cn(
+                      "p-3.5 flex items-start gap-3 transition-colors",
+                      isSelected && "bg-primary/5"
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setDetailDocId(isSelected ? null : doc.id)}
+                      className="h-8 w-8 rounded-lg bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0 cursor-pointer"
+                    >
+                      {getFileIcon(doc.file_type, "h-4 w-4")}
+                    </button>
                     <div className="flex-1 min-w-0">
-                      <p
-                        className="text-xs font-semibold text-foreground truncate"
+                      <button
+                        type="button"
+                        onClick={() => setDetailDocId(isSelected ? null : doc.id)}
+                        className="text-xs font-semibold text-foreground truncate block text-left w-full hover:text-primary transition-colors cursor-pointer"
                         title={doc.title}
                       >
                         {doc.title}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                      </button>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                         <span className="text-[10px] text-muted-foreground">
-                          {subjectName || "Unclassified"}
+                          {subjectName || "Unassigned"}
                         </span>
                         <span className="text-[10px] text-muted-foreground">·</span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {formatFileSize(doc.uploads?.file_size)}
+                        <span className="text-[10px] text-muted-foreground uppercase font-medium">
+                          {doc.file_type || "File"}
                         </span>
                         <span className="text-[10px] text-muted-foreground">·</span>
                         <span className="text-[10px] text-muted-foreground">
@@ -1260,7 +1787,11 @@ function UploadHistorySection({
                         </span>
                       </div>
                       <div className="mt-1.5">
-                        {getStatusBadge(doc.summary_status, doc.quiz_status)}
+                        {getStatusBadge(
+                          doc.summary_status,
+                          doc.quiz_status,
+                          doc.classification_status
+                        )}
                       </div>
                     </div>
                     {isDeleting ? (
@@ -1269,20 +1800,35 @@ function UploadHistorySection({
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
-                            <button className="h-7 w-7 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground transition-colors cursor-pointer shrink-0">
+                            <button
+                              type="button"
+                              aria-label={`Actions for ${doc.title}`}
+                              className="h-7 w-7 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground transition-colors cursor-pointer shrink-0"
+                            >
                               <MoreHorizontal className="h-4 w-4" />
                             </button>
                           }
                         />
                         <DropdownMenuContent
                           align="end"
-                          className="w-44 bg-card/95 border border-border/70 shadow-2xl backdrop-blur-md"
+                          className="w-44 bg-card/98 border border-border/70 shadow-lg"
                         >
+                          <DropdownMenuItem
+                            className="text-xs cursor-pointer"
+                            onClick={() => setDetailDocId(doc.id)}
+                          >
+                            <Eye className="h-3.5 w-3.5 mr-2" />
+                            Preview File
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             className="text-xs cursor-pointer"
                             onClick={() =>
                               doc.file_url &&
-                              window.open(doc.file_url, "_blank", "noopener,noreferrer")
+                              window.open(
+                                doc.file_url,
+                                "_blank",
+                                "noopener,noreferrer"
+                              )
                             }
                           >
                             <ExternalLink className="h-3.5 w-3.5 mr-2" />
@@ -1291,7 +1837,9 @@ function UploadHistorySection({
                           <DropdownMenuItem
                             className="text-xs cursor-pointer"
                             onClick={() =>
-                              handleNavigate(`/assistant?documentId=${doc.id}`)
+                              handleNavigate(
+                                `/assistant?documentId=${doc.id}`
+                              )
                             }
                           >
                             <BrainCircuit className="h-3.5 w-3.5 mr-2" />
@@ -1303,7 +1851,7 @@ function UploadHistorySection({
                             onClick={() => handleDelete(doc.id)}
                           >
                             <Trash2 className="h-3.5 w-3.5 mr-2" />
-                            Delete
+                            Move to Recycle Bin
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1313,9 +1861,9 @@ function UploadHistorySection({
               })}
             </div>
 
-            {/* Table footer */}
+            {/* Pagination footer */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-border/40 bg-secondary/20">
+              <div className="flex items-center justify-between px-4 py-2.5 border-t border-border/40 bg-muted/20">
                 <p className="text-[11px] text-muted-foreground">
                   Showing {pageStart + 1}–
                   {Math.min(pageStart + ITEMS_PER_PAGE, sorted.length)} of{" "}
@@ -1327,11 +1875,11 @@ function UploadHistorySection({
                     size="sm"
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={page === 1}
-                    className="h-7 w-7 p-0 cursor-pointer"
+                    aria-label="Previous page"
+                    className="h-6 w-6 p-0 cursor-pointer"
                   >
-                    <ChevronLeft className="h-4 w-4" />
+                    <ChevronLeft className="h-3.5 w-3.5" />
                   </Button>
-                  {/* Page numbers (show max 5 around current) */}
                   {Array.from({ length: totalPages }, (_, i) => i + 1)
                     .filter(
                       (p) =>
@@ -1356,9 +1904,10 @@ function UploadHistorySection({
                       ) : (
                         <button
                           key={p}
+                          type="button"
                           onClick={() => setPage(p as number)}
                           className={cn(
-                            "h-7 w-7 text-[11px] font-semibold rounded-md transition-colors cursor-pointer",
+                            "h-6 w-6 text-[11px] font-medium rounded transition-colors cursor-pointer",
                             page === p
                               ? "bg-primary text-primary-foreground"
                               : "text-muted-foreground hover:bg-secondary"
@@ -1373,18 +1922,19 @@ function UploadHistorySection({
                     size="sm"
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={page === totalPages}
-                    className="h-7 w-7 p-0 cursor-pointer"
+                    aria-label="Next page"
+                    className="h-6 w-6 p-0 cursor-pointer"
                   >
-                    <ChevronRight className="h-4 w-4" />
+                    <ChevronRight className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </div>
             )}
           </div>
 
-          {/* File Detail Panel — slide in beside table */}
+          {/* Slide-in Details & Preview Panel */}
           {detailDoc && (
-            <div className="hidden lg:block w-72 shrink-0">
+            <div className="hidden lg:block w-80 shrink-0">
               <FileDetailPanel
                 doc={detailDoc}
                 subjects={subjects}
@@ -1404,9 +1954,14 @@ function UploadHistorySection({
 // Root export: UploadCenter
 // ---------------------------------------------------------------------------
 
-export function UploadCenter({ documents, subjects }: UploadCenterProps) {
+export function UploadCenter({
+  documents,
+  subjects,
+  pendingDocs = [],
+}: UploadCenterProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const dropZoneRef = useRef<HTMLDivElement | null>(null);
 
   const handleUploadComplete = useCallback(() => {
     startTransition(() => {
@@ -1414,22 +1969,36 @@ export function UploadCenter({ documents, subjects }: UploadCenterProps) {
     });
   }, [router]);
 
+  const handleScrollToUpload = useCallback(() => {
+    dropZoneRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
   return (
-    <div className="flex flex-col gap-8 animate-in fade-in duration-300">
-      {/* Section 1: Upload Area */}
-      <UploadArea subjects={subjects} onUploadComplete={handleUploadComplete} />
+    <div className="flex flex-col gap-6">
+      {/* 1. Main Upload Area */}
+      <UploadArea
+        subjects={subjects}
+        onUploadComplete={handleUploadComplete}
+        dropZoneRef={dropZoneRef}
+      />
 
-      {/* Section divider */}
-      <div className="relative flex items-center gap-4">
-        <div className="flex-1 border-t border-border/40" />
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 select-none">
-          Upload History
-        </span>
-        <div className="flex-1 border-t border-border/40" />
-      </div>
+      {/* 2. Lightweight Status / Statistics Overview */}
+      <UploadStatisticsStrip
+        documents={documents}
+        pendingCount={pendingDocs.length}
+      />
 
-      {/* Section 2: History */}
-      <UploadHistorySection documents={documents} subjects={subjects} />
+      {/* 3. Needs Your Attention (only when pending classification files exist) */}
+      {pendingDocs.length > 0 && (
+        <ClassificationCard pendingDocs={pendingDocs} subjects={subjects} />
+      )}
+
+      {/* 4. Upload History */}
+      <UploadHistorySection
+        documents={documents}
+        subjects={subjects}
+        onUploadClick={handleScrollToUpload}
+      />
     </div>
   );
 }

@@ -188,7 +188,7 @@ export class SubjectClassifier {
       return {
         subjectId: explicitChoice.subjectId,
         subjectName: explicitChoice.subjectName,
-        folderName,
+        folderName: folderName || 'Lectures',
         labSubfolderName,
         confidence: explicitChoice.score,
         method: 'explicit_selection',
@@ -205,7 +205,7 @@ export class SubjectClassifier {
       return {
         subjectId: contextChoice.subjectId,
         subjectName: contextChoice.subjectName,
-        folderName,
+        folderName: folderName || 'Lectures',
         labSubfolderName,
         confidence: contextChoice.score,
         method: 'folder_context',
@@ -221,7 +221,7 @@ export class SubjectClassifier {
       return {
         subjectId: courseCodeChoice.subjectId,
         subjectName: courseCodeChoice.subjectName,
-        folderName,
+        folderName: folderName || 'Lectures',
         labSubfolderName,
         confidence: courseCodeChoice.score,
         method: 'course_code',
@@ -237,7 +237,7 @@ export class SubjectClassifier {
       return {
         subjectId: exactChoice.subjectId,
         subjectName: exactChoice.subjectName,
-        folderName,
+        folderName: folderName || 'Lectures',
         labSubfolderName,
         confidence: exactChoice.score,
         method: 'exact_match',
@@ -253,7 +253,7 @@ export class SubjectClassifier {
       return {
         subjectId: fuzzyChoice.subjectId,
         subjectName: fuzzyChoice.subjectName,
-        folderName,
+        folderName: folderName || 'Lectures',
         labSubfolderName,
         confidence: fuzzyChoice.score,
         method: 'fuzzy_match',
@@ -282,7 +282,7 @@ export class SubjectClassifier {
         return {
           subjectId: semanticResult.winner.subjectId,
           subjectName: semanticResult.winner.subjectName,
-          folderName,
+          folderName: folderName || 'Lectures',
           labSubfolderName,
           confidence: semanticResult.winner.score,
           method: 'semantic_match',
@@ -307,7 +307,7 @@ export class SubjectClassifier {
         return {
           subjectId: llmResult.winner.subjectId,
           subjectName: llmResult.winner.subjectName,
-          folderName,
+          folderName: folderName || 'Lectures',
           labSubfolderName,
           confidence: llmResult.winner.score,
           method: 'llm',
@@ -332,7 +332,7 @@ export class SubjectClassifier {
     );
 
     return buildUserConfirmationResult(
-      folderName,
+      folderName || 'Lectures',
       labSubfolderName,
       uniqueCandidates,
       'Classification confidence is below threshold. User confirmation required.'

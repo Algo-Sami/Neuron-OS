@@ -56,104 +56,112 @@ export async function saveUploadMetadata({
 
   // 3. Resolve Folder (with parent-child nesting for Lab materials) if subject is confidently identified
   if (resolvedSubjectId) {
-    if (classification.folderName === "Lab" && classification.labSubfolderName) {
-      let labParentId: string | null = null
+    if (folderId) {
+      // User explicitly uploaded inside a specific folder context
+      resolvedFolderId = folderId;
+    } else {
+      const targetFolderName = classification.folderName || 'Lectures';
 
-      // Check if root-level "Lab" folder exists
-      const { data: existingLabParent } = await supabase
-        .from('folders')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('subject_id', resolvedSubjectId)
-        .ilike('name', 'Lab')
-        .is('parent_folder_id', null)
-        .maybeSingle()
+      if (targetFolderName === "Lab" && classification.labSubfolderName) {
+        let labParentId: string | null = null
 
-      if (existingLabParent) {
-        labParentId = existingLabParent.id
-      } else {
-        const { data: newLabParent, error: parentError } = await supabase
-          .from('folders')
-          .insert({
-            user_id: user.id,
-            subject_id: resolvedSubjectId,
-            parent_folder_id: null,
-            name: "Lab"
-          })
-          .select('id')
-          .single()
-
-        if (!parentError && newLabParent) {
-          labParentId = newLabParent.id
-          console.log(`[Upload Routing] Created parent "Lab" folder (id=${labParentId})`);
-        } else {
-          console.error("[Upload Routing] Failed to create Lab parent folder:", parentError)
-        }
-      }
-
-      // Check if child Lab subfolder exists (e.g. "Lab Tasks", "Lab Manuals", "Other Lab Files")
-      if (labParentId) {
-        const { data: existingChild } = await supabase
+        // Check if root-level "Lab" folder exists
+        const { data: existingLabParent } = await supabase
           .from('folders')
           .select('id')
           .eq('user_id', user.id)
           .eq('subject_id', resolvedSubjectId)
-          .eq('parent_folder_id', labParentId)
-          .ilike('name', classification.labSubfolderName)
+          .ilike('name', 'Lab')
+          .is('parent_folder_id', null)
           .maybeSingle()
 
-        if (existingChild) {
-          resolvedFolderId = existingChild.id
+        if (existingLabParent) {
+          labParentId = existingLabParent.id
         } else {
-          const { data: newChild, error: childError } = await supabase
+          const { data: newLabParent, error: parentError } = await supabase
             .from('folders')
             .insert({
               user_id: user.id,
               subject_id: resolvedSubjectId,
-              parent_folder_id: labParentId,
-              name: classification.labSubfolderName
+              parent_folder_id: null,
+              name: "Lab"
             })
             .select('id')
             .single()
 
-          if (!childError && newChild) {
-            resolvedFolderId = newChild.id
-            console.log(`[Upload Routing] Created child Lab folder: "${classification.labSubfolderName}" (id=${resolvedFolderId})`);
+          if (!parentError && newLabParent) {
+            labParentId = newLabParent.id
+            console.log(`[Upload Routing] Created parent "Lab" folder (id=${labParentId})`);
           } else {
-            console.error("[Upload Routing] Failed to create Lab child folder:", childError)
+            console.error("[Upload Routing] Failed to create Lab parent folder:", parentError)
           }
         }
-      }
-    } else if (classification.folderName) {
-      // Non-lab root-level folder (Lectures, Assignments, Quizzes, Presentations, Projects)
-      const { data: existingFolder } = await supabase
-        .from('folders')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('subject_id', resolvedSubjectId)
-        .ilike('name', classification.folderName)
-        .is('parent_folder_id', null)
-        .maybeSingle()
 
-      if (existingFolder) {
-        resolvedFolderId = existingFolder.id
+        // Check if child Lab subfolder exists (e.g. "Lab Tasks", "Lab Manuals", "Other Lab Files")
+        if (labParentId) {
+          const { data: existingChild } = await supabase
+            .from('folders')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('subject_id', resolvedSubjectId)
+            .eq('parent_folder_id', labParentId)
+            .ilike('name', classification.labSubfolderName)
+            .maybeSingle()
+
+          if (existingChild) {
+            resolvedFolderId = existingChild.id
+          } else {
+            const { data: newChild, error: childError } = await supabase
+              .from('folders')
+              .insert({
+                user_id: user.id,
+                subject_id: resolvedSubjectId,
+                parent_folder_id: labParentId,
+                name: classification.labSubfolderName
+              })
+              .select('id')
+              .single()
+
+            if (!childError && newChild) {
+              resolvedFolderId = newChild.id
+              console.log(`[Upload Routing] Created child Lab folder: "${classification.labSubfolderName}" (id=${resolvedFolderId})`);
+            } else {
+              console.error("[Upload Routing] Failed to create Lab child folder:", childError)
+            }
+          }
+        }
       } else {
-        const { data: newFolder, error: folderErr } = await supabase
+        // Non-lab root-level folder (Lectures, Assignments, Quizzes, Presentations, Projects)
+        // Guaranteed to default to 'Lectures' if classification.folderName was not specified
+        const { data: existingFolder } = await supabase
           .from('folders')
-          .insert({
-            user_id: user.id,
-            subject_id: resolvedSubjectId,
-            parent_folder_id: null,
-            name: classification.folderName
-          })
           .select('id')
-          .single()
+          .eq('user_id', user.id)
+          .eq('subject_id', resolvedSubjectId)
+          .ilike('name', targetFolderName)
+          .is('parent_folder_id', null)
+          .maybeSingle()
 
-        if (!folderErr && newFolder) {
-          resolvedFolderId = newFolder.id
-          console.log(`[Upload Routing] Created folder: "${classification.folderName}" (id=${resolvedFolderId})`);
-        } else if (folderErr) {
-          console.error(`[Upload Routing] Failed to create folder ${classification.folderName}:`, folderErr)
+        if (existingFolder) {
+          resolvedFolderId = existingFolder.id
+        } else {
+          const { data: newFolder, error: folderErr } = await supabase
+            .from('folders')
+            .insert({
+              user_id: user.id,
+              subject_id: resolvedSubjectId,
+              parent_folder_id: null,
+              name: targetFolderName
+            })
+            .select('id')
+            .single()
+
+          if (!folderErr && newFolder) {
+            resolvedFolderId = newFolder.id
+            console.log(`[Upload Routing] Created folder: "${targetFolderName}" (id=${resolvedFolderId})`);
+          } else if (folderErr) {
+            console.error(`[Upload Routing] Failed to create folder ${targetFolderName}:`, folderErr)
+          }
         }
       }
     }
@@ -198,7 +206,7 @@ export async function saveUploadMetadata({
       file_url: fileUrl,
       file_type: fileType,
       ai_subject: classification.subjectName || null,
-      ai_topic: classification.labSubfolderName || classification.folderName || 'General Notes',
+      ai_topic: classification.labSubfolderName || classification.folderName || 'Lectures',
       classification_confidence: classification.confidence,
       classification_status: classificationStatus,
       summary_status: 'pending',
@@ -260,7 +268,17 @@ export async function saveUploadMetadata({
   }
   
   console.log(`[UploadTiming] saveUploadMetadata COMPLETED in ${(performance.now() - t0).toFixed(0)}ms for document ${docResult.id}`);
-  return { success: true, documentId: docResult.id }
+  return {
+    success: true,
+    documentId: docResult.id,
+    subjectId: resolvedSubjectId,
+    subjectName: classification.subjectName || null,
+    folderName: classification.folderName || (resolvedSubjectId ? 'Lectures' : null),
+    labSubfolderName: classification.labSubfolderName || null,
+    confidence: classification.confidence,
+    classificationStatus: classificationStatus,
+    method: classification.method,
+  };
 }
 
 export async function deleteUpload(uploadId: string, documentId: string, fileUrl: string) {
@@ -431,6 +449,7 @@ export async function confirmAIClassification(documentId: string) {
     .eq('user_id', user.id)
     .eq('subject_id', subjectId)
     .ilike('name', suggestedTopic)
+    .is('parent_folder_id', null)
     .maybeSingle();
 
   if (existingFolder) {
@@ -441,6 +460,7 @@ export async function confirmAIClassification(documentId: string) {
       .insert({
         user_id: user.id,
         subject_id: subjectId,
+        parent_folder_id: null,
         name: suggestedTopic
       })
       .select('id')
@@ -563,6 +583,7 @@ export async function rejectOrCustomizeClassification(
     .eq('user_id', user.id)
     .eq('subject_id', subjectId)
     .ilike('name', cleanTopic)
+    .is('parent_folder_id', null)
     .maybeSingle();
 
   if (existingFolder) {
@@ -573,6 +594,7 @@ export async function rejectOrCustomizeClassification(
       .insert({
         user_id: user.id,
         subject_id: subjectId,
+        parent_folder_id: null,
         name: cleanTopic
       })
       .select('id')

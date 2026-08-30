@@ -84,7 +84,7 @@ export function classifyFilename(
   if (normalizedSubject.length >= 2 && !IGNORE_WORDS.includes(normalizedSubject.toLowerCase())) {
     return {
       subjectName: normalizedSubject,
-      folderName,
+      folderName: folderName || 'Lectures',
       labSubfolderName,
       confidence: 0.85,
     };
@@ -92,7 +92,7 @@ export function classifyFilename(
 
   return {
     subjectName: '',
-    folderName,
+    folderName: folderName || 'Lectures',
     labSubfolderName,
     confidence: 0.0,
   };
