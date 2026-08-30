@@ -12,6 +12,7 @@ import { evaluateCourseCode } from './layers/layer3-course-code';
 import { evaluateExactMatch } from './layers/layer4-exact-match';
 import { evaluateFuzzyMatch } from './layers/layer5-fuzzy-match';
 import { evaluateSemanticMatch } from './layers/layer6-semantic-match';
+import { evaluateLLMFallback } from './layers/layer7-llm-fallback';
 import { buildUserConfirmationResult } from './layers/layer8-user-confirmation';
 
 /**
