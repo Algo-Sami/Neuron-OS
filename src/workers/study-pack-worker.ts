@@ -228,9 +228,14 @@ async function processStudyPackJob(job: Job<StudyPackJobPayload>): Promise<Study
 const workerOptions: WorkerOptions = {
   connection: createDedicatedRedisConnection(),
   concurrency: CONCURRENCY,
-  // Grace period before BullMQ marks a job stalled (complements our DB lease)
-  stalledInterval: 60_000,
-  lockDuration: 90_000,
+  // Generous BullMQ lock duration (10 minutes) matching our 12-minute DB lease
+  // Prevents BullMQ from marking active LLM sliding window summarization as stalled
+  stalledInterval: 120_000, // 2 minutes
+  lockDuration: 600_000,    // 10 minutes
+  // ── Redis Polling ─────────────────────────────────────────────────────────
+  // 500ms delay when queue is empty. Real Redis (Railway / Local) has no
+  // request limits, allowing ultra-fast job pickup and high throughput.
+  drainDelay: 500,
 };
 
 const worker = new Worker<StudyPackJobPayload, StudyPackJobResult>(

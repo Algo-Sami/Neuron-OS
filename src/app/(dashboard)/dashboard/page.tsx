@@ -109,6 +109,8 @@ export default async function DashboardPage(props: { searchParams: Promise<{ err
       .from('documents')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id)
+      .not('upload_id', 'is', null)
+      .or('ai_doc_type.is.null,ai_doc_type.neq.ai_generated')
       .is('deleted_at', null),
     supabase
       .from('documents')
@@ -128,6 +130,8 @@ export default async function DashboardPage(props: { searchParams: Promise<{ err
       .from('documents')
       .select('id, title, created_at, subjects(name)')
       .eq('user_id', user.id)
+      .not('upload_id', 'is', null)
+      .or('ai_doc_type.is.null,ai_doc_type.neq.ai_generated')
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .limit(4),

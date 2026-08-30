@@ -14,11 +14,13 @@ export default async function UploadsPage() {
     await cleanupExpiredRecycledDocuments(user.id);
   }
 
-  // Fetch the user's document history including nested upload file size and classification columns
-  const { data: documents } = await supabase
+  // Fetch only genuine user-uploaded documents (explicitly excluding AI-generated resources at the database layer)
+  const { data: userUploadedDocs } = await supabase
     .from('documents')
     .select('*, uploads(file_size)')
     .eq('user_id', user?.id)
+    .not('upload_id', 'is', null)
+    .or('ai_doc_type.is.null,ai_doc_type.neq.ai_generated')
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
@@ -30,16 +32,20 @@ export default async function UploadsPage() {
     .is('deleted_at', null)
     .order('name');
 
-  // Extract documents that are pending AI classification approval (low confidence)
-  const pendingDocs: PendingDoc[] = (documents || [])
-    .filter(d => d.classification_status === 'pending' && d.summary_status === 'completed' && d.ai_subject && d.ai_topic)
-    .map(d => ({
+  // Extract documents that are pending classification approval / review (low confidence)
+  const pendingDocs: PendingDoc[] = (userUploadedDocs || [])
+    .filter(
+      (d) =>
+        (d.classification_status === 'needs_review' || d.classification_status === 'pending') &&
+        (d.ai_subject || !d.subject_id)
+    )
+    .map((d) => ({
       id: d.id,
       title: d.title,
       ai_subject: d.ai_subject,
       ai_topic: d.ai_topic,
       ai_doc_type: d.ai_doc_type,
-      classification_confidence: d.classification_confidence
+      classification_confidence: d.classification_confidence,
     }));
 
   return (
@@ -58,12 +64,12 @@ export default async function UploadsPage() {
 
       {/* AI Auto-Classification fallback prompts */}
       {pendingDocs.length > 0 && (
-        <ClassificationCard pendingDocs={pendingDocs} />
+        <ClassificationCard pendingDocs={pendingDocs} subjects={subjects || []} />
       )}
 
       {/* Upload Center — Upload Area + History */}
       <UploadCenter
-        documents={documents || []}
+        documents={userUploadedDocs || []}
         subjects={subjects || []}
       />
     </div>

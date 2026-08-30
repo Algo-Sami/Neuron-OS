@@ -3,22 +3,27 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { awardXP } from '@/services/gamification/rewards'
-import { classifyFilename, normalizeSubjectName } from '@/services/upload-routing'
 import { scaffoldSubjectFoldersAction } from '@/actions/folders'
 import { dispatchStudyPackGeneration } from '@/services/ai/pipeline/study-pack-dispatcher'
+import { SubjectClassifier } from '@/services/classification/classifier'
+import { ClassificationLearningService } from '@/services/classification/learning-service'
 
 export async function saveUploadMetadata({
   fileName,
   fileUrl,
   fileType,
   fileSize,
-  subjectId
+  subjectId,
+  folderId,
+  currentSubjectId,
 }: {
   fileName: string;
   fileUrl: string;
   fileType: string;
   fileSize: number;
   subjectId?: string;
+  folderId?: string;
+  currentSubjectId?: string;
 }) {
   const t0 = performance.now();
   console.log(`[UploadTiming] saveUploadMetadata START for "${fileName}"`);
@@ -30,85 +35,26 @@ export async function saveUploadMetadata({
     throw new Error('Unauthorized')
   }
 
-  // 2. Classify filename
-  const classification = classifyFilename(fileName)
-  console.log(`[Upload Routing] File: "${fileName}" -> Classified Subject: "${classification.subjectName}", Folder: "${classification.folderName}", Confidence: ${classification.confidence}`);
+  // 2. Classify against user's actual subjects using the 8-layer classification pipeline
+  const classification = await SubjectClassifier.classify(
+    {
+      userId: user.id,
+      filename: fileName,
+      subjectId,
+      folderId,
+      currentSubjectId,
+    },
+    { supabase }
+  );
 
-  let resolvedSubjectId: string | null = null
-  let resolvedFolderId: string | null = null
-  let classificationStatus: 'auto_applied' | 'needs_review' = classification.confidence >= 0.80 || subjectId ? 'auto_applied' : 'needs_review'
+  const resolvedSubjectId: string | null = classification.subjectId;
+  let resolvedFolderId: string | null = null;
+  const isHighConfidence = classification.confidence >= 0.90 || !!subjectId;
+  const classificationStatus: 'auto_applied' | 'needs_review' = isHighConfidence
+    ? 'auto_applied'
+    : 'needs_review';
 
-  // Fetch all existing active subjects to perform double normalization matching
-  const { data: existingSubjects } = await supabase
-    .from('subjects')
-    .select('id, name')
-    .eq('user_id', user.id)
-    .is('deleted_at', null)
-
-  if (classification.confidence >= 0.80) {
-    const extractedNormalized = normalizeSubjectName(classification.subjectName).toLowerCase()
-
-    // Match case-insensitively using double normalization
-    const matchedSubject = (existingSubjects || []).find((s) => {
-      return normalizeSubjectName(s.name).toLowerCase() === extractedNormalized
-    })
-
-    if (matchedSubject) {
-      resolvedSubjectId = matchedSubject.id
-      console.log(`[Upload Routing] Reusing existing subject: "${matchedSubject.name}" (id=${resolvedSubjectId}) for extracted "${classification.subjectName}"`);
-    } else {
-      // Create new subject
-      const { data: newSubject, error: subjectError } = await supabase
-        .from('subjects')
-        .insert({
-          user_id: user.id,
-          name: classification.subjectName,
-          color: '#F4C542' // Default Windows folder yellow
-        })
-        .select('id')
-        .single()
-
-      if (subjectError) {
-        throw new Error(`Failed to create subject: ${subjectError.message}`)
-      }
-      resolvedSubjectId = newSubject.id
-      console.log(`[Upload Routing] Created new subject: "${classification.subjectName}" (id=${resolvedSubjectId})`);
-    }
-  } else {
-    // If classification confidence is low, fallback to subjectId chosen during upload
-    if (subjectId) {
-      resolvedSubjectId = subjectId
-      classificationStatus = 'auto_applied' // Manually routed by user choice
-    } else {
-      // Find or create general study subject
-      const defaultSubjectName = 'General Study'
-      const matchedDefault = (existingSubjects || []).find((s) => {
-        return normalizeSubjectName(s.name).toLowerCase() === normalizeSubjectName(defaultSubjectName).toLowerCase()
-      })
-
-      if (matchedDefault) {
-        resolvedSubjectId = matchedDefault.id
-      } else {
-        const { data: newDefault, error: defaultSubjectError } = await supabase
-          .from('subjects')
-          .insert({
-            user_id: user.id,
-            name: defaultSubjectName,
-            color: '#F4C542'
-          })
-          .select('id')
-          .single()
-
-        if (defaultSubjectError) {
-          throw new Error(`Failed to create default subject: ${defaultSubjectError.message}`)
-        }
-        resolvedSubjectId = newDefault.id
-      }
-      classificationStatus = 'needs_review'
-    }
-  }
-
-  // 3. Resolve Folder (with parent-child nesting for Lab materials)
+  // 3. Resolve Folder (with parent-child nesting for Lab materials) if subject is confidently identified
   if (resolvedSubjectId) {
     if (classification.folderName === "Lab" && classification.labSubfolderName) {
       let labParentId: string | null = null
@@ -251,7 +197,7 @@ export async function saveUploadMetadata({
       title: fileName,
       file_url: fileUrl,
       file_type: fileType,
-      ai_subject: classification.confidence >= 0.80 ? classification.subjectName : null,
+      ai_subject: classification.subjectName || null,
       ai_topic: classification.labSubfolderName || classification.folderName || 'General Notes',
       classification_confidence: classification.confidence,
       classification_status: classificationStatus,
@@ -265,21 +211,39 @@ export async function saveUploadMetadata({
     throw new Error(`Failed to create document: ${docError.message}`)
   }
 
-  // 6. Automatically dispatch background study pack generation to BullMQ queue
-  //    Direct server-side dispatch ensures the Railway worker immediately receives the task.
-  try {
-    const dispatchRes = await dispatchStudyPackGeneration({
-      supabase,
-      userId: user.id,
-      documentId: docResult.id,
-      fileUrl,
-      fileType,
-      force: false,
-    });
-    console.log(`[Upload Routing] Auto-dispatched study pack generation: status=${dispatchRes.status}, jobId=${dispatchRes.jobId}`);
-  } catch (err) {
-    // Non-throwing: a redis/queue glitch must never abort a successful upload
-    console.warn('[Upload Routing] Exception while auto-dispatching background study pack task:', err);
+  // 6. Record classification event for audit trail and continuous learning
+  ClassificationLearningService.recordEvent(supabase, {
+    documentId: docResult.id,
+    userId: user.id,
+    predictedSubjectId: classification.subjectId,
+    finalSubjectId: resolvedSubjectId,
+    confidence: classification.confidence,
+    method: classification.method,
+    userCorrected: false,
+    reason: classification.reason,
+  }).catch((err) => console.warn('[Upload Routing] Failed to record classification event:', err));
+
+  // 7. Automatically dispatch background study pack generation to BullMQ queue.
+  //    Only dispatched when the document has been assigned a subject — unclassified
+  //    documents that land in "needs_review" must first be confirmed by the user
+  //    (via ClassificationCard) before AI processing can start.
+  if (resolvedSubjectId) {
+    try {
+      const dispatchRes = await dispatchStudyPackGeneration({
+        supabase,
+        userId: user.id,
+        documentId: docResult.id,
+        fileUrl,
+        fileType,
+        force: false,
+      });
+      console.log(`[Upload Routing] Auto-dispatched study pack generation: status=${dispatchRes.status}, jobId=${dispatchRes.jobId}`);
+    } catch (err) {
+      // Non-throwing: a redis/queue glitch must never abort a successful upload
+      console.warn('[Upload Routing] Exception while auto-dispatching background study pack task:', err);
+    }
+  } else {
+    console.log(`[Upload Routing] Skipping study pack dispatch — document "${docResult.id}" has no subject yet. AI processing will start after user assigns a subject.`);
   }
 
   // Award XP for uploading study materials (non-blocking)
@@ -329,6 +293,85 @@ export async function deleteUpload(uploadId: string, documentId: string, fileUrl
   return { success: true }
 }
 
+/**
+ * Permanently deletes a pending classification upload, its storage file, and its metadata.
+ * Scoped strictly to the authenticated user.
+ */
+export async function deletePendingUpload(documentId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error('Unauthorized');
+  }
+
+  // 1. Verify document belongs to current user
+  const { data: doc, error: fetchErr } = await supabase
+    .from('documents')
+    .select('id, upload_id, file_url, user_id')
+    .eq('id', documentId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (fetchErr) {
+    console.error('[deletePendingUpload] Fetch error:', fetchErr);
+  }
+
+  if (!doc) {
+    // If document is already deleted or not found, handle gracefully
+    revalidatePath('/uploads');
+    revalidatePath('/subjects');
+    return { success: true };
+  }
+
+  // 2. Safely remove storage object from documents bucket
+  if (doc.file_url) {
+    try {
+      let storagePath = '';
+      if (doc.file_url.includes('/documents/')) {
+        storagePath = decodeURIComponent(doc.file_url.split('/documents/')[1]?.split('?')[0] || '');
+      } else {
+        const parts = doc.file_url.split('/');
+        storagePath = `${user.id}/${parts[parts.length - 1]}`;
+      }
+      if (storagePath) {
+        await supabase.storage.from('documents').remove([storagePath]);
+      }
+    } catch (storageErr: any) {
+      console.warn('[deletePendingUpload] Storage file remove warning:', storageErr?.message);
+    }
+  }
+
+  // 3. Delete from documents table (foreign-key CASCADE handles chunks, knowledge, summaries)
+  const { error: docDeleteError } = await supabase
+    .from('documents')
+    .delete()
+    .eq('id', documentId)
+    .eq('user_id', user.id);
+
+  if (docDeleteError) {
+    console.error('[deletePendingUpload] Failed to delete document record:', docDeleteError);
+    throw new Error('Unable to delete this upload. Please try again.');
+  }
+
+  // 4. Delete corresponding audit log from uploads table if linked
+  if (doc.upload_id) {
+    try {
+      await supabase
+        .from('uploads')
+        .delete()
+        .eq('id', doc.upload_id)
+        .eq('user_id', user.id);
+    } catch (uploadDelErr) {
+      console.warn('[deletePendingUpload] Upload audit record delete warning:', uploadDelErr);
+    }
+  }
+
+  revalidatePath('/uploads');
+  revalidatePath('/subjects');
+  return { success: true };
+}
+
 export async function confirmAIClassification(documentId: string) {
   const supabase = await createClient();
 
@@ -338,7 +381,7 @@ export async function confirmAIClassification(documentId: string) {
   // 1. Fetch document suggested fields
   const { data: doc, error: docError } = await supabase
     .from('documents')
-    .select('id, title, ai_subject, ai_topic')
+    .select('id, title, ai_subject, ai_topic, classification_confidence, file_url, file_type')
     .eq('id', documentId)
     .eq('user_id', user.id)
     .single();
@@ -347,10 +390,13 @@ export async function confirmAIClassification(documentId: string) {
     throw new Error('Document not found');
   }
 
-  const suggestedSubject = doc.ai_subject || 'General Study';
-  const suggestedTopic = doc.ai_topic || 'General Notes';
+  const suggestedSubject = doc.ai_subject?.trim();
+  if (!suggestedSubject) {
+    throw new Error('Please select or specify a subject before confirming.');
+  }
+  const suggestedTopic = doc.ai_topic || 'Lectures';
 
-  // 2. Resolve Subject (Find or Create)
+  // 2. Resolve Subject (Find existing user subject or create)
   let subjectId = null;
   const { data: existingSubject } = await supabase
     .from('subjects')
@@ -368,7 +414,7 @@ export async function confirmAIClassification(documentId: string) {
       .insert({
         user_id: user.id,
         name: suggestedSubject,
-        color: '#F4C542'
+        color: '#6366F1'
       })
       .select('id')
       .single();
@@ -418,8 +464,43 @@ export async function confirmAIClassification(documentId: string) {
 
   if (updateError) throw updateError;
 
+  // 5. Record classification event & learn confirmed alias
+  ClassificationLearningService.recordEvent(supabase, {
+    documentId: doc.id,
+    userId: user.id,
+    predictedSubjectId: subjectId,
+    finalSubjectId: subjectId,
+    confidence: doc.classification_confidence || 1.0,
+    method: 'user_confirmation',
+    userCorrected: false,
+    reason: `User confirmed classification to "${suggestedSubject}"`,
+  }).catch((err) => console.warn('[confirmAIClassification] Error recording event:', err));
+
+  ClassificationLearningService.learnAliasFromDecision(
+    supabase,
+    subjectId,
+    doc.title,
+    'confirmed'
+  ).catch((err) => console.warn('[confirmAIClassification] Error learning alias:', err));
+
+  // 6. Now that subject is confirmed — trigger AI study pack generation
+  //    This is the correct trigger point for previously-unclassified documents.
+  dispatchStudyPackGeneration({
+    supabase,
+    userId: user.id,
+    documentId: doc.id,
+    fileUrl: doc.file_url,
+    fileType: doc.file_type || 'pdf',
+    force: false,
+  }).then((res) => {
+    console.log(`[confirmAIClassification] Study pack dispatched: status=${res.status}, jobId=${res.jobId}`);
+  }).catch((err) => {
+    console.warn('[confirmAIClassification] Study pack dispatch warning (non-fatal):', err);
+  });
+
   revalidatePath('/uploads');
   revalidatePath('/subjects');
+  if (subjectId) revalidatePath(`/subjects/${subjectId}`);
   return { success: true };
 }
 
@@ -433,8 +514,19 @@ export async function rejectOrCustomizeClassification(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
 
-  const cleanSubject = customSubject.trim() || 'General Study';
-  const cleanTopic = customTopic.trim() || 'General Notes';
+  // Fetch document for title and original predicted subject
+  const { data: doc } = await supabase
+    .from('documents')
+    .select('id, title, ai_subject, subject_id, classification_confidence, file_url, file_type')
+    .eq('id', documentId)
+    .eq('user_id', user.id)
+    .single();
+
+  const cleanSubject = customSubject.trim();
+  if (!cleanSubject) {
+    throw new Error('Please specify a subject name.');
+  }
+  const cleanTopic = customTopic.trim() || 'Lectures';
 
   // 1. Resolve Subject (Find or Create)
   let subjectId = null;
@@ -506,8 +598,46 @@ export async function rejectOrCustomizeClassification(
 
   if (updateError) throw updateError;
 
+  // 4. Record classification event & learn user correction alias
+  ClassificationLearningService.recordEvent(supabase, {
+    documentId: doc?.id || documentId,
+    userId: user.id,
+    predictedSubjectId: doc?.subject_id || null,
+    finalSubjectId: subjectId,
+    confidence: doc?.classification_confidence || 1.0,
+    method: 'user_confirmation',
+    userCorrected: true,
+    reason: `User customized subject to "${cleanSubject}"`,
+  }).catch((err) => console.warn('[rejectOrCustomizeClassification] Error recording event:', err));
+
+  if (doc?.title) {
+    ClassificationLearningService.learnAliasFromDecision(
+      supabase,
+      subjectId,
+      doc.title,
+      'user'
+    ).catch((err) => console.warn('[rejectOrCustomizeClassification] Error learning alias:', err));
+  }
+
+  // 5. Trigger AI study pack generation — subject is now confirmed by the user
+  if (doc?.file_url) {
+    dispatchStudyPackGeneration({
+      supabase,
+      userId: user.id,
+      documentId: doc.id,
+      fileUrl: doc.file_url,
+      fileType: doc.file_type || 'pdf',
+      force: false,
+    }).then((res) => {
+      console.log(`[rejectOrCustomizeClassification] Study pack dispatched: status=${res.status}, jobId=${res.jobId}`);
+    }).catch((err) => {
+      console.warn('[rejectOrCustomizeClassification] Study pack dispatch warning (non-fatal):', err);
+    });
+  }
+
   revalidatePath('/uploads');
   revalidatePath('/subjects');
+  if (subjectId) revalidatePath(`/subjects/${subjectId}`);
   return { success: true };
 }
 

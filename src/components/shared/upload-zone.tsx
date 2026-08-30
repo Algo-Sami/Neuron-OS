@@ -7,7 +7,17 @@ import { saveUploadMetadata } from "@/actions/uploads"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 
-export function UploadZone({ onUploadComplete }: { onUploadComplete?: (documentId: string, fileName: string) => void } = {}) {
+export function UploadZone({
+  onUploadComplete,
+  subjectId,
+  folderId,
+  currentSubjectId,
+}: {
+  onUploadComplete?: (documentId: string, fileName: string) => void;
+  subjectId?: string;
+  folderId?: string;
+  currentSubjectId?: string;
+} = {}) {
   const [isDragging, setIsDragging] = React.useState(false)
   const [file, setFile] = React.useState<File | null>(null)
   const [progress, setProgress] = React.useState(0)
@@ -115,7 +125,10 @@ export function UploadZone({ onUploadComplete }: { onUploadComplete?: (documentI
         fileName: file.name,
         fileUrl: publicUrl,
         fileType: extension,
-        fileSize: file.size
+        fileSize: file.size,
+        subjectId,
+        folderId,
+        currentSubjectId,
       })
       console.log(`[UploadTiming] saveUploadMetadata END in ${(performance.now() - tMeta).toFixed(0)}ms`);
 

@@ -2,7 +2,11 @@
  * Recovery and Lease Constants for Background AI Jobs (Phase 2B-4)
  */
 
-export const JOB_LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+// Primary job lease: 12 minutes.
+// Long-running AI stages (sliding window summarization on large docs) can take
+// 80-120 seconds. With a 60-second heartbeat interval, a 5-minute lease would
+// expire mid-AI-call. 12 minutes gives 11 heartbeat windows before expiry.
+export const JOB_LEASE_DURATION_MS = 12 * 60 * 1000; // 12 minutes
 export const JOB_HEARTBEAT_INTERVAL_MS = 60 * 1000; // 60 seconds
 export const JOB_MAX_ATTEMPTS = 3;
 

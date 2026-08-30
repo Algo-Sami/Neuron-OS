@@ -107,6 +107,11 @@ export class JobRecoveryService {
    * Periodically updates heartbeat_at and extends lock_expires_at for the owning worker.
    * Returns false if the worker no longer owns the lease.
    */
+  /**
+   * Periodically updates heartbeat_at and extends lock_expires_at for the owning worker.
+   * Resilient implementation: verifies actual DB state before declaring lease lost.
+   * Returns false ONLY if another active worker has explicitly claimed the task.
+   */
   static async sendHeartbeat(
     supabase: SupabaseClient,
     taskId: string,
@@ -117,6 +122,7 @@ export class JobRecoveryService {
       const now = new Date();
       const expiresAt = new Date(now.getTime() + leaseDurationMs);
 
+      // Primary attempt: atomic update scoped to workerId
       const { data, error } = await supabase
         .from('background_tasks')
         .update({
@@ -126,20 +132,63 @@ export class JobRecoveryService {
         })
         .eq('id', taskId)
         .eq('locked_by', workerId)
-        .select('id')
+        .select('id, locked_by')
         .maybeSingle();
 
-      if (error || !data) {
-        logger.warn(
-          `[JobRecovery] Heartbeat failed for task ${taskId} (worker: ${workerId}). Worker may have lost lease.`
-        );
+      if (!error && data) {
+        return true;
+      }
+
+      // If atomic update returned no rows or had a transient error, check current task state
+      logger.warn(`[JobRecovery] Primary heartbeat update did not match for task ${taskId} (error: ${error?.message || 'no row returned'}). Inspecting ownership...`);
+
+      const { data: currentTask, error: inspectErr } = await supabase
+        .from('background_tasks')
+        .select('id, status, locked_by, lock_expires_at')
+        .eq('id', taskId)
+        .maybeSingle();
+
+      if (inspectErr || !currentTask) {
+        logger.warn(`[JobRecovery] Task ${taskId} inspection failed (${inspectErr?.message || 'not found'}). Assuming transient network error — retaining lease.`);
+        return true; // Don't abort on transient network error fetching task
+      }
+
+      // If task is terminal, lease is done
+      const status = (currentTask.status || '').toLowerCase().trim();
+      if (status === 'completed' || status === 'cancelled') {
         return false;
       }
 
-      return true;
+      // If another active worker has explicitly claimed it with a non-expired lease, then lease is truly lost
+      if (currentTask.locked_by && currentTask.locked_by !== workerId) {
+        const otherExpiry = currentTask.lock_expires_at ? new Date(currentTask.lock_expires_at).getTime() : 0;
+        if (otherExpiry > now.getTime()) {
+          logger.warn(`[JobRecovery] Task ${taskId} was claimed by another worker (${currentTask.locked_by}). Lease truly lost.`);
+          return false;
+        }
+      }
+
+      // If locked_by is still this worker, or was cleared by a watchdog (null), re-assert our lease!
+      const { error: reassertErr } = await supabase
+        .from('background_tasks')
+        .update({
+          locked_by: workerId,
+          heartbeat_at: now.toISOString(),
+          lock_expires_at: expiresAt.toISOString(),
+          updated_at: now.toISOString()
+        })
+        .eq('id', taskId);
+
+      if (!reassertErr) {
+        logger.info(`[JobRecovery] Successfully re-asserted lease for task ${taskId} (worker: ${workerId}).`);
+        return true;
+      }
+
+      logger.warn(`[JobRecovery] Re-assertion failed for task ${taskId}: ${reassertErr.message}`);
+      return true; // Still give the in-flight process the benefit of the doubt
     } catch (err: any) {
-      logger.warn(`[JobRecovery] Heartbeat exception for task ${taskId}: ${err?.message}`);
-      return false;
+      logger.warn(`[JobRecovery] Heartbeat exception for task ${taskId}: ${err?.message}. Retaining lease.`);
+      return true; // Don't abort on uncaught exception in heartbeat
     }
   }
 
@@ -239,14 +288,17 @@ export class JobRecoveryService {
     let failedCount = 0;
 
     try {
-      const now = new Date().toISOString();
+      // Grace buffer: require lock to be expired by at least 60 seconds before recovering
+      // This prevents the watchdog from racing with an in-flight heartbeat extension.
+      const GRACE_BUFFER_MS = 60 * 1000;
+      const cutoffTime = new Date(Date.now() - GRACE_BUFFER_MS).toISOString();
 
       let query = supabase
         .from('background_tasks')
         .select('id, user_id, document_id, status, locked_by, heartbeat_at, lock_expires_at, attempts, max_attempts')
         .in('status', ACTIVE_PIPELINE_STATUSES as unknown as string[])
         .not('lock_expires_at', 'is', null)
-        .lt('lock_expires_at', now);
+        .lt('lock_expires_at', cutoffTime);
 
       if (userId) {
         query = query.eq('user_id', userId);

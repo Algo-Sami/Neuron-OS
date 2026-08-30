@@ -15,7 +15,8 @@ import { FolderSyncService } from './folder-sync-service';
 import { GeneratedPdfResult } from './pdf-generator-service';
 import { PipelineValidator } from './context-validator';
 import { JobRecoveryService } from './job-recovery-service';
-import { JOB_HEARTBEAT_INTERVAL_MS } from './recovery-constants';
+import { SubjectClassifier } from '@/services/classification/classifier';
+import { ClassificationLearningService } from '@/services/classification/learning-service';
 
 export interface SchedulerOptions {
   forceRun?: boolean;
@@ -29,6 +30,7 @@ export class AIJobScheduler {
   private workerId: string;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private isLeaseLost: boolean = false;
+  private consecutiveHeartbeatFailures: number = 0;
 
   constructor(
     private supabase: SupabaseClient,
@@ -43,13 +45,28 @@ export class AIJobScheduler {
 
   private startHeartbeat() {
     this.stopHeartbeat();
+    this.consecutiveHeartbeatFailures = 0;
+
+    // Send heartbeat every 30 seconds (frequent keep-alive)
+    const HEARTBEAT_INTERVAL = 30 * 1000;
+
     this.heartbeatTimer = setInterval(async () => {
-      const ok = await JobRecoveryService.sendHeartbeat(this.supabase, this.taskId, this.workerId);
-      if (!ok) {
-        this.isLeaseLost = true;
-        this.logDisk('heartbeat', `Worker ${this.workerId} lost task lease. Aborting background processing.`, 'WARN');
+      try {
+        const ok = await JobRecoveryService.sendHeartbeat(this.supabase, this.taskId, this.workerId);
+        if (ok) {
+          this.consecutiveHeartbeatFailures = 0;
+        } else {
+          this.consecutiveHeartbeatFailures++;
+          this.logDisk('heartbeat', `Heartbeat attempt failed (${this.consecutiveHeartbeatFailures}/3).`, 'WARN');
+          if (this.consecutiveHeartbeatFailures >= 3) {
+            this.isLeaseLost = true;
+            this.logDisk('heartbeat', `Worker ${this.workerId} definitively lost task lease after 3 attempts. Aborting background processing.`, 'WARN');
+          }
+        }
+      } catch (err: any) {
+        this.logDisk('heartbeat', `Heartbeat tick exception (non-fatal): ${err?.message}`, 'WARN');
       }
-    }, JOB_HEARTBEAT_INTERVAL_MS);
+    }, HEARTBEAT_INTERVAL);
 
     if (this.heartbeatTimer.unref) {
       this.heartbeatTimer.unref();
@@ -94,10 +111,20 @@ export class AIJobScheduler {
     });
   }
 
-  private async saveProgress(status: string, errorMessage?: string) {
-    if (this.isLeaseLost) {
+  private async saveProgress(
+    status: string,
+    errorMessage?: string,
+    allowAfterLeaseLoss: boolean = false
+  ) {
+    if (this.isLeaseLost && !allowAfterLeaseLoss) {
       this.logDisk('progress', 'Task lease lost to another worker. Aborting.', 'WARN');
       throw new Error('LEASE_LOST');
+    }
+
+    if (this.isLeaseLost && allowAfterLeaseLoss) {
+      // Lease was lost but we allow this critical final write (e.g. pdfRender after summaryGen completed).
+      // We skip the DB update and just log — the stale-job recovery will pick this up if needed.
+      this.logDisk('progress', `[LeaseGrace] Allowing final stage write despite lease loss (status=${status}).`, 'WARN');
     }
 
     const now = new Date().toISOString();
@@ -580,8 +607,73 @@ export class AIJobScheduler {
         updated_at: new Date().toISOString()
       }).eq('document_id', this.documentId);
 
-      const resolvedSubjectId = doc.subject_id;
-      const subjectName       = (doc.subjects as any)?.name || 'General';
+      let resolvedSubjectId = doc.subject_id;
+      let subjectName       = (doc.subjects as any)?.name || 'General Study';
+
+      // If document was uploaded without high-confidence subject classification,
+      // run Layer 6 (Semantic) / Layer 7 (LLM) using the extracted text and chunks
+      if (!resolvedSubjectId) {
+        try {
+          this.logDisk('classification', 'Document subject unresolved at upload. Running content classification...', 'INFO');
+          const { data: chunksForCls } = await this.supabase
+            .from('document_chunks')
+            .select('content, embedding')
+            .eq('document_id', this.documentId);
+
+          const classification = await SubjectClassifier.classify(
+            {
+              userId: this.userId,
+              filename: docTitle,
+              extractedText: extRes.text,
+              chunks: (chunksForCls || []).map((c: any) => ({ content: c.content, embedding: c.embedding })),
+            },
+            { supabase: this.supabase, allowAI: true }
+          );
+
+          if (classification.subjectId && classification.confidence >= 0.90) {
+            resolvedSubjectId = classification.subjectId;
+            subjectName = classification.subjectName || subjectName;
+
+            this.logDisk(
+              'classification',
+              `Content Classification resolved subject to "${subjectName}" (id=${resolvedSubjectId}, method=${classification.method}, conf=${classification.confidence})`,
+              'INFO'
+            );
+
+            // Update document record with resolved subject
+            await this.supabase
+              .from('documents')
+              .update({
+                subject_id: resolvedSubjectId,
+                ai_subject: subjectName,
+                classification_confidence: classification.confidence,
+                classification_status: 'auto_applied',
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', this.documentId);
+
+            // Record classification event
+            await ClassificationLearningService.recordEvent(this.supabase, {
+              documentId: this.documentId,
+              userId: this.userId,
+              predictedSubjectId: resolvedSubjectId,
+              finalSubjectId: resolvedSubjectId,
+              confidence: classification.confidence,
+              method: classification.method,
+              userCorrected: false,
+              reason: classification.reason,
+            });
+          } else {
+            this.logDisk(
+              'classification',
+              `Content Classification remains uncertain (conf=${classification.confidence}). Document remains in review state.`,
+              'INFO'
+            );
+          }
+        } catch (clsErr: any) {
+          this.logDisk('classification', `Content classification warning: ${clsErr?.message}`, 'WARN');
+        }
+      }
 
       // ── 8. Summary Generation ──────────────────────────────────────────────
       this.logDisk('summaryGen', `[StageResume] document=${this.documentId} resume_from=summaryGen`, 'INFO');
@@ -647,10 +739,13 @@ export class AIJobScheduler {
       }).eq('document_id', this.documentId);
 
       // ── 9. PDF Rendering & Storage ─────────────────────────────────────────
+      // NOTE: allowAfterLeaseLoss=true here — summaryGen already checkpointed so
+      // even if the heartbeat misfired during the long AI call, we MUST complete
+      // the PDF step. Not doing so causes the "summary saved but no PDF in folder" bug.
       this.logDisk('pdfRender', 'PDF Rendering Started', 'INFO');
       this.updateStage('pdfRender', { status: 'processing', startTime: new Date().toISOString() });
 
-      await this.saveProgress('Rendering PDF');
+      await this.saveProgress('Rendering PDF', undefined, true);
       await this.supabase.from('document_knowledge').update({
         current_processing_stage: 'Rendering PDF',
         updated_at: new Date().toISOString()

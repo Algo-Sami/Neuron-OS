@@ -2364,6 +2364,9 @@ export function FileExplorer({
           </DialogHeader>
           <div className="mt-2">
             <UploadZone
+              subjectId={currentSubjectId || undefined}
+              folderId={currentFolderId || undefined}
+              currentSubjectId={currentSubjectId || undefined}
               onUploadComplete={async (docId) => {
                 if (currentSubjectId) {
                   await linkFilesToFolder([docId], currentSubjectId, currentFolderId);
