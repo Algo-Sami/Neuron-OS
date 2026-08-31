@@ -227,14 +227,26 @@ export function FileExplorer({
     }
   }
 
+  const selectParam = searchParams ? (searchParams.get("select") || searchParams.get("file")) : null;
+  const [prevSelectParam, setPrevSelectParam] = useState<string | null>(null);
+
   // Settings / Toolbar state
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences?.viewMode || "details");
   const [sortBy, setSortBy] = useState<SortProperty>(initialPreferences?.sortBy || "name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">(initialPreferences?.sortOrder || "asc");
 
-  // Selection
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Selection (pre-populated with selected file if coming from Open File Location)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => (selectParam ? new Set([selectParam]) : new Set())
+  );
+
+  if (selectParam !== prevSelectParam) {
+    setPrevSelectParam(selectParam);
+    if (selectParam) {
+      setSelectedIds(new Set([selectParam]));
+    }
+  }
 
   // Selection memory (persistence when navigating back up)
   // Use refs to track previous values — avoids setState-in-effect cascading renders
@@ -462,8 +474,14 @@ export function FileExplorer({
     const DONE_STATUSES = new Set(["completed", "Completed", "failed", "Failed"]);
 
     for (const task of backgroundTasks) {
-      // Strip extension from doc_title to match folder name
-      const key = task.doc_title.replace(/\.[^/.]+$/, "").toLowerCase().trim();
+      if (!task.doc_title) continue;
+      // Normalize doc_title: strip extension and collapse spaces/underscores
+      const rawTitle = task.doc_title.replace(/\.[^/.]+$/, "").toLowerCase().trim();
+      const normalizedKey = rawTitle.replace(/[_\s]+/g, " ");
+
+      // Since backgroundTasks are ordered created_at DESC, newest task takes precedence
+      if (map.has(rawTitle) || map.has(normalizedKey)) continue;
+
       const stages = task.progress?.stages;
 
       // Use the detailed status string directly as the stage label
@@ -481,7 +499,9 @@ export function FileExplorer({
         }
       }
 
-      map.set(key, { status: task.status, stage, errorMessage });
+      const info = { status: task.status, stage, errorMessage };
+      map.set(rawTitle, info);
+      map.set(normalizedKey, info);
     }
     return map;
   }, [backgroundTasks]);
@@ -753,7 +773,7 @@ export function FileExplorer({
           name: d.title,
           type: "file" as const,
           fileType: d.file_type,
-          fileSize: d.uploads?.file_size || 0,
+          fileSize: d.size !== undefined && d.size !== null ? d.size : (d.uploads?.file_size || 0),
           createdAt: d.created_at,
           summaryStatus: d.summary_status,
           quizStatus: d.quiz_status,
@@ -774,7 +794,7 @@ export function FileExplorer({
           name: d.title,
           type: "file" as const,
           fileType: d.file_type,
-          fileSize: d.uploads?.file_size || 0,
+          fileSize: d.size !== undefined && d.size !== null ? d.size : (d.uploads?.file_size || 0),
           createdAt: d.created_at,
           summaryStatus: d.summary_status,
           quizStatus: d.quiz_status,
@@ -826,12 +846,20 @@ export function FileExplorer({
         let taskStage: string | null = null;
         let taskErrorMessage: string | null = null;
         if (f.parent_folder_id && aiCategoryFolderIds.has(f.parent_folder_id)) {
-          const taskKey = f.name.toLowerCase().trim();
-          const taskInfo = taskStatusMap.get(taskKey);
-          if (taskInfo) {
-            taskStatus = taskInfo.status;
-            taskStage = taskInfo.stage;
-            taskErrorMessage = taskInfo.errorMessage;
+          const rawKey = f.name.toLowerCase().trim();
+          const normKey = rawKey.replace(/[_\s]+/g, " ");
+          const taskInfo = taskStatusMap.get(rawKey) || taskStatusMap.get(normKey);
+
+          // If the folder already has generated documents or is processed, it is complete and NOT queued/ready
+          const isCompleted = stats.fileCount > 0 || aiStatus === "processed";
+
+          if (taskInfo && !isCompleted) {
+            // Completed tasks don't need a status badge on folders
+            if (taskInfo.status !== "completed" && taskInfo.status !== "Completed") {
+              taskStatus = taskInfo.status;
+              taskStage = taskInfo.stage;
+              taskErrorMessage = taskInfo.errorMessage;
+            }
           }
         }
 
@@ -853,6 +881,15 @@ export function FileExplorer({
           taskStage,
           taskErrorMessage,
         };
+      })
+      .filter((f) => {
+        // Hide document-level subfolders under AI Generated if they have 0 active files and no active task
+        if (f.parentFolderId && aiCategoryFolderIds.has(f.parentFolderId)) {
+          if (f.documentCount === 0 && f.folderCount === 0 && !f.taskStatus) {
+            return false;
+          }
+        }
+        return true;
       });
 
     const files = initialDocuments
@@ -950,7 +987,7 @@ export function FileExplorer({
   }, [sortedItems, selectedIds]);
 
   const totalStorageUsedMB = useMemo(() => {
-    const totalBytes = initialDocuments.reduce((acc, doc) => acc + (doc.uploads?.file_size || 0), 0);
+    const totalBytes = initialDocuments.reduce((acc, doc) => acc + (doc.size ?? doc.uploads?.file_size ?? 0), 0);
     return totalBytes / (1024 * 1024);
   }, [initialDocuments]);
 

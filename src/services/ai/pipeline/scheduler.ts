@@ -738,6 +738,11 @@ export class AIJobScheduler {
         updated_at: new Date().toISOString()
       }).eq('document_id', this.documentId);
 
+      await this.supabase.from('documents').update({
+        summary_status: 'completed',
+        updated_at: new Date().toISOString()
+      }).eq('id', this.documentId);
+
       // ── 9. PDF Rendering & Storage ─────────────────────────────────────────
       // NOTE: allowAfterLeaseLoss=true here — summaryGen already checkpointed so
       // even if the heartbeat misfired during the long AI call, we MUST complete
@@ -873,7 +878,7 @@ export class AIJobScheduler {
 
       try {
         const folderSyncService = new FolderSyncService(this.supabase);
-        await folderSyncService.run(this.userId, resolvedSubjectId, docTitle, [pdfResult], subjectName);
+        await folderSyncService.run(this.userId, resolvedSubjectId, docTitle, [pdfResult], subjectName, this.documentId);
         this.logDisk('pdfRender', 'PDF Stored', 'INFO');
       } catch (err: any) {
         const errMsg = `Folder sync failed: ${err.message}`;
@@ -907,6 +912,12 @@ export class AIJobScheduler {
         current_processing_stage: 'Completed',
         updated_at: new Date().toISOString()
       }).eq('document_id', this.documentId);
+
+      await this.supabase.from('documents').update({
+        summary_status: 'completed',
+        quiz_status: 'completed',
+        updated_at: new Date().toISOString()
+      }).eq('id', this.documentId);
 
       this.logDisk('init', 'Pipeline Completed', 'INFO');
       await this.saveProgress('Completed');

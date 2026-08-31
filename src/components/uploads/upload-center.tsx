@@ -11,7 +11,7 @@ import React, {
 import { useRouter } from "next/navigation";
 import {
   Upload,
-  File,
+  File as FileIcon,
   FileText,
   Image as ImageIcon,
   Archive,
@@ -41,9 +41,16 @@ import {
   Layers,
   Eye,
   Folder,
+  FolderOpen,
+  Copy,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { saveUploadMetadata, moveDocumentToRecycleBin } from "@/actions/uploads";
+import { 
+  saveUploadMetadata, 
+  moveDocumentToRecycleBin, 
+  checkDuplicateUploadAction,
+  getSummaryFileLocationAction
+} from "@/actions/uploads";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +68,7 @@ import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/store/settings-store";
 import { classifyFile } from "@/services/ai/ai-classification";
 import { AIStudyPackDialog } from "./ai-study-pack-dialog";
+import { DuplicateUploadDialog } from "./duplicate-upload-dialog";
 import { ClassificationCard, type PendingDoc } from "@/components/shared/classification-card";
 
 // ---------------------------------------------------------------------------
@@ -74,12 +82,13 @@ interface SubjectItem {
   code?: string | null;
 }
 
-interface DocumentRow {
+export interface DocumentRow {
   id: string;
   title: string;
   file_type: string | null;
   file_url: string | null;
   created_at: string;
+  deleted_at?: string | null;
   summary_status: string | null;
   quiz_status: string | null;
   classification_status?: string | null;
@@ -87,7 +96,9 @@ interface DocumentRow {
   ai_topic: string | null;
   subject_id: string | null;
   folder_id?: string | null;
+  size?: number | null;
   uploads?: { file_size: number | null } | null;
+  file_deleted?: boolean;
 }
 
 interface UploadCenterProps {
@@ -102,6 +113,7 @@ type QueueItemStatus =
   | "classifying"
   | "success"
   | "needs_review"
+  | "duplicate"
   | "error";
 
 interface UploadQueueItem {
@@ -117,12 +129,23 @@ interface UploadQueueItem {
   destinationSubject?: string | null;
   destinationFolder?: string | null;
   abortController?: AbortController;
+  duplicateInfo?: {
+    existingFile: {
+      id: string;
+      name: string;
+      subjectName?: string | null;
+      folderName?: string | null;
+      size?: number | null;
+      createdAt?: string;
+    };
+    suggestedCopyName: string;
+  };
 }
 
 type SortKey = "date" | "name" | "type" | "subject";
 type SortDir = "asc" | "desc";
 type FormatFilterKey = "all" | "pdf" | "docx" | "pptx" | "txt" | "image";
-type StatusFilterKey = "all" | "completed" | "processing" | "needs_review" | "failed";
+type StatusFilterKey = "all" | "completed" | "processing" | "needs_review" | "failed" | "deleted";
 
 const ITEMS_PER_PAGE = 15;
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
@@ -169,14 +192,24 @@ function getFileIcon(type: string | null | undefined, className = "h-4 w-4") {
   if (["jpg", "jpeg", "png", "webp", "gif", "svg"].includes(t))
     return <ImageIcon className={cn(className, "text-emerald-500")} />;
   if (t === "zip" || t === "rar") return <Archive className={cn(className, "text-amber-500")} />;
-  return <File className={cn(className, "text-muted-foreground")} />;
+  return <FileIcon className={cn(className, "text-muted-foreground")} />;
 }
 
 function getStatusBadge(
   summaryStatus: string | null,
   quizStatus: string | null,
-  classificationStatus?: string | null
+  classificationStatus?: string | null,
+  fileDeleted?: boolean
 ) {
+  if (fileDeleted) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-destructive/10 text-destructive border border-destructive/20">
+        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        File Deleted
+      </span>
+    );
+  }
+
   if (classificationStatus === "needs_review" || classificationStatus === "pending") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
@@ -191,9 +224,7 @@ function getStatusBadge(
   const isFailed =
     summaryStatus === "failed" || quizStatus === "failed";
   const isCompleted =
-    (summaryStatus === "completed" || summaryStatus === "pending" || summaryStatus === null) &&
-    quizStatus !== "processing" &&
-    quizStatus !== "failed";
+    summaryStatus === "completed" || quizStatus === "completed";
 
   if (isProcessing) {
     return (
@@ -221,6 +252,7 @@ function getStatusBadge(
   }
   return (
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border border-border/50">
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
       Uploaded
     </span>
   );
@@ -245,20 +277,14 @@ function UploadStatisticsStrip({
 
   const completedCount = useMemo(() => {
     return documents.filter((d) => {
-      return (
-        d.summary_status === "completed" ||
-        d.quiz_status === "completed" ||
-        (d.classification_status !== "needs_review" &&
-          d.summary_status !== "processing" &&
-          d.summary_status !== "failed" &&
-          d.quiz_status !== "failed")
-      );
+      if (d.file_deleted) return false;
+      return d.summary_status === "completed" || d.quiz_status === "completed";
     }).length;
   }, [documents]);
 
   const processingCount = useMemo(() => {
     return documents.filter(
-      (d) => d.summary_status === "processing" || d.quiz_status === "processing"
+      (d) => !d.file_deleted && (d.summary_status === "processing" || d.quiz_status === "processing")
     ).length;
   }, [documents]);
 
@@ -351,6 +377,39 @@ function UploadArea({
     fileTypeLabel: string;
   } | null>(null);
 
+  const [duplicateDialogItem, setDuplicateDialogItem] = useState<{
+    item: UploadQueueItem;
+    suggestedCopyName: string;
+    existingFile?: {
+      id: string;
+      name: string;
+      subjectName?: string | null;
+      folderName?: string | null;
+      size?: number | null;
+      createdAt?: string;
+    };
+  } | null>(null);
+
+  const handleUploadAsCopy = useCallback((item: UploadQueueItem, copyName: string) => {
+    setDuplicateDialogItem(null);
+    const renamedFile = new File([item.file], copyName, { type: item.file.type });
+    setQueue((prev) =>
+      prev.map((q) =>
+        q.id === item.id
+          ? {
+              ...q,
+              file: renamedFile,
+              name: copyName,
+              status: "waiting",
+              progress: 0,
+              errorMsg: undefined,
+              duplicateInfo: undefined,
+            }
+          : q
+      )
+    );
+  }, []);
+
   // Validate single file
   const validateFile = (f: File): string | null => {
     if (f.size <= 0) return `"${f.name}" is an empty file.`;
@@ -428,7 +487,7 @@ function UploadArea({
       setQueue((prev) =>
         prev.map((q) =>
           q.id === item.id
-            ? { ...q, status: "uploading", progress: 15, abortController }
+            ? { ...q, status: "uploading", progress: 10, abortController }
             : q
         )
       );
@@ -440,6 +499,53 @@ function UploadArea({
           error: authErr,
         } = await supabase.auth.getUser();
         if (authErr || !user) throw new Error("Please log in to upload files.");
+
+        // ── 1. Application-level Duplicate Preflight Check ─────────────────────
+        //    Checks destination folder before uploading file bytes to storage.
+        try {
+          const dupCheck = await checkDuplicateUploadAction({
+            fileName: item.name,
+            subjectId: selectedSubjectId || undefined,
+          });
+
+          if (dupCheck.success && dupCheck.isDuplicate) {
+            const suggestedCopyName = dupCheck.suggestedCopyName || `${item.name} (1)`;
+            const duplicateInfo = {
+              existingFile: dupCheck.existingFile || {
+                id: '',
+                name: item.name,
+                subjectName: null,
+                folderName: null,
+                size: item.size,
+              },
+              suggestedCopyName,
+            };
+
+            setQueue((prev) =>
+              prev.map((q) =>
+                q.id === item.id
+                  ? {
+                      ...q,
+                      status: "duplicate",
+                      progress: 0,
+                      duplicateInfo,
+                      errorMsg: `A file named "${item.name}" already exists in this location.`,
+                    }
+                  : q
+              )
+            );
+
+            // Pop dialog for immediate resolution
+            setDuplicateDialogItem({
+              item,
+              suggestedCopyName,
+              existingFile: duplicateInfo.existingFile,
+            });
+            return;
+          }
+        } catch (checkErr) {
+          console.warn("[Upload Preflight] Duplicate check exception:", checkErr);
+        }
 
         const cleanName = item.name.replace(/[^a-zA-Z0-9.-]/g, "_");
         const filePath = `${user.id}/${Date.now()}_${cleanName}`;
@@ -476,8 +582,43 @@ function UploadArea({
           subjectId: selectedSubjectId || undefined,
         });
 
-        if (!result?.success || !result?.documentId) {
-          throw new Error("Failed to save document metadata.");
+        if (!result.success) {
+          if (result.code === "DUPLICATE_FILE") {
+            const suggestedCopyName = result.suggestedCopyName || `${item.name} (1)`;
+            const duplicateInfo = {
+              existingFile: result.existingFile || {
+                id: '',
+                name: item.name,
+                subjectName: null,
+                folderName: null,
+                size: item.size,
+              },
+              suggestedCopyName,
+            };
+
+            setQueue((prev) =>
+              prev.map((q) =>
+                q.id === item.id
+                  ? {
+                      ...q,
+                      status: "duplicate",
+                      progress: 0,
+                      duplicateInfo,
+                      errorMsg: `A file named "${item.name}" already exists in this location.`,
+                    }
+                  : q
+              )
+            );
+
+            setDuplicateDialogItem({
+              item,
+              suggestedCopyName,
+              existingFile: duplicateInfo.existingFile,
+            });
+            return;
+          }
+
+          throw new Error(result.message || "Failed to save document metadata.");
         }
 
         const isNeedsReview = result.classificationStatus === "needs_review";
@@ -518,54 +659,13 @@ function UploadArea({
           }
         };
 
-        if (classification.category === "auto") {
-          const isLectures = classification.label.toLowerCase().includes("lecture");
-          const isNotes = classification.label.toLowerCase().includes("note");
-          const isPresentations =
-            classification.label.toLowerCase().includes("presentation") ||
-            classification.label.toLowerCase().includes("slide");
+        // AI study pack dispatch check — ONLY for lecture files
+        const isLectureFolder =
+          /lecture/i.test(destinationFolder || "") ||
+          /lecture/i.test(classification.label || "");
 
-          const isEnabled =
-            (isLectures && settings.aiAutoLectures) ||
-            (isNotes && settings.aiAutoNotes) ||
-            (isPresentations && settings.aiAutoPresentations) ||
-            (!isLectures && !isNotes && !isPresentations);
-
-          if (isEnabled) {
-            fireStudyPack();
-          }
-        } else if (classification.category === "confirm") {
-          const isAssignment =
-            classification.label.toLowerCase().includes("assignment") ||
-            classification.label.toLowerCase().includes("homework");
-          const isQuiz = classification.label.toLowerCase().includes("quiz");
-          const isProject = classification.label.toLowerCase().includes("project");
-          const isLab = classification.label.toLowerCase().includes("lab");
-          const isPastPaper =
-            classification.label.toLowerCase().includes("past paper") ||
-            classification.label.toLowerCase().includes("exam");
-
-          const autoAssess =
-            (isAssignment && settings.aiAutoAssignments) ||
-            (isQuiz && settings.aiAutoQuizzes) ||
-            (isProject && settings.aiAutoProjects) ||
-            (isLab && settings.aiAutoLabs) ||
-            (isPastPaper && settings.aiAutoPastPapers);
-
-          const remembered = settings.aiAssessmentRememberedChoice;
-
-          if (autoAssess || remembered === "generate") {
-            fireStudyPack();
-          } else if (remembered !== "skip") {
-            setPendingDoc({
-              documentId: result.documentId,
-              fileUrl: publicUrl,
-              fileType: item.type,
-              fileName: item.name,
-              fileTypeLabel: classification.label,
-            });
-            setShowConfirm(true);
-          }
+        if (isLectureFolder && settings.aiAutoLectures !== false) {
+          fireStudyPack();
         }
 
         onUploadComplete();
@@ -797,6 +897,8 @@ function UploadArea({
                       ? "bg-emerald-500/[0.04] border-emerald-500/20"
                       : item.status === "needs_review"
                       ? "bg-amber-500/[0.04] border-amber-500/20"
+                      : item.status === "duplicate"
+                      ? "bg-amber-500/[0.04] border-amber-500/30"
                       : item.status === "error"
                       ? "bg-destructive/[0.04] border-destructive/20"
                       : "bg-background/80 border-border/60"
@@ -856,6 +958,32 @@ function UploadArea({
                         </span>
                       )}
 
+                      {item.status === "duplicate" && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                            <Copy className="h-3 w-3" />
+                            Already exists
+                          </span>
+                          {item.duplicateInfo?.suggestedCopyName && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleUploadAsCopy(
+                                  item,
+                                  item.duplicateInfo!.suggestedCopyName
+                                )
+                              }
+                              className="h-6 text-[10px] px-2 py-0 rounded border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
+                              title={`Upload as ${item.duplicateInfo.suggestedCopyName}`}
+                            >
+                              Upload as Copy
+                            </Button>
+                          )}
+                        </div>
+                      )}
+
                       {item.status === "error" && (
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] text-destructive font-medium">
@@ -888,6 +1016,12 @@ function UploadArea({
                     <Progress value={item.progress} className="h-1 bg-secondary" />
                   )}
 
+                  {item.status === "duplicate" && (
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
+                      A file with this name already exists in this location. You can upload it as a copy ({item.duplicateInfo?.suggestedCopyName}) or cancel.
+                    </p>
+                  )}
+
                   {item.status === "error" && item.errorMsg && (
                     <p className="text-[10px] text-destructive mt-0.5">
                       {item.errorMsg}
@@ -899,6 +1033,22 @@ function UploadArea({
           </div>
         )}
       </div>
+
+      {duplicateDialogItem && (
+        <DuplicateUploadDialog
+          open={!!duplicateDialogItem}
+          fileName={duplicateDialogItem.item.name}
+          suggestedCopyName={duplicateDialogItem.suggestedCopyName}
+          existingFileInfo={duplicateDialogItem.existingFile}
+          onUploadAsCopy={async (copyName) => {
+            handleUploadAsCopy(duplicateDialogItem.item, copyName);
+          }}
+          onCancel={() => {
+            handleCancelItem(duplicateDialogItem.item.id);
+            setDuplicateDialogItem(null);
+          }}
+        />
+      )}
 
       <AIStudyPackDialog
         open={showConfirm}
@@ -944,208 +1094,134 @@ function UploadArea({
 // Phase 3: Lightweight File Preview Panel (Visual Preview + Structured Metadata)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Clean "View Details" Panel — only essential metadata, no bloat
+// ---------------------------------------------------------------------------
 function FileDetailPanel({
   doc,
   subjects,
   onClose,
-  onDelete,
-  onNavigate,
 }: {
   doc: DocumentRow;
   subjects: SubjectItem[];
   onClose: () => void;
-  onDelete: (id: string) => void;
-  onNavigate: (path: string) => void;
 }) {
   const subject = subjects.find((s) => s.id === doc.subject_id);
-  const fileSize = doc.uploads?.file_size;
-  const isImage = isImageType(doc.file_type);
-  const isPdf = (doc.file_type || "").toLowerCase() === "pdf";
+  const fileSize = doc.size ?? doc.uploads?.file_size;
+  const rawExt = (doc.file_type || "").toLowerCase().replace(/^\./, "");
 
-  // Handle escape key to close preview
+  // Escape key to close
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
   return (
     <div
-      aria-label={`File preview for ${doc.title}`}
-      className="rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm p-4 space-y-3.5 animate-in fade-in duration-200"
+      aria-label={`Details for ${doc.title}`}
+      className="rounded-2xl border border-border/80 bg-card/95 backdrop-blur-xl shadow-xl shadow-black/10 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-200 ring-1 ring-border/50"
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="h-8 w-8 rounded-lg bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0">
-            {getFileIcon(doc.file_type, "h-4 w-4")}
+      {/* ── Coloured Header strip ── */}
+      <div className="px-3.5 pt-3.5 pb-3 border-b border-border/60 bg-muted/30">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="h-7 w-7 rounded-lg bg-secondary border border-border/50 flex items-center justify-center shrink-0">
+              {getFileIcon(doc.file_type, "h-3.5 w-3.5")}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-foreground truncate leading-tight" title={doc.title}>
+                {doc.title}
+              </p>
+              <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide">
+                {rawExt || "file"}
+              </span>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p
-              className="text-xs font-semibold text-foreground truncate"
-              title={doc.title}
-            >
-              {doc.title}
-            </p>
-            <p className="text-[10px] text-muted-foreground uppercase font-medium">
-              {doc.file_type?.toUpperCase() || "File"}
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close file preview"
-          className="p-1 hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
       </div>
 
-      {/* Lightweight Visual File Preview */}
-      {doc.file_url && (
-        <div className="rounded-lg overflow-hidden border border-border/40 bg-muted/30">
-          {isImage ? (
-            <div className="relative w-full h-36 bg-black/5 flex items-center justify-center overflow-hidden">
-              <img
-                src={doc.file_url}
-                alt={doc.title}
-                className="max-h-full max-w-full object-contain"
-                loading="lazy"
-              />
-            </div>
-          ) : isPdf ? (
-            <div className="relative w-full h-36 bg-muted/40 flex flex-col items-center justify-center p-3 text-center">
-              <FileText className="h-8 w-8 text-red-500 mb-1.5" />
-              <p className="text-[11px] font-medium text-foreground truncate max-w-full">
-                PDF Document
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-[11px] h-6 px-2.5 mt-2 gap-1 cursor-pointer"
-                onClick={() => window.open(doc.file_url!, "_blank", "noopener,noreferrer")}
-              >
-                <Eye className="h-3 w-3" />
-                View Full PDF
-              </Button>
-            </div>
-          ) : (
-            <div className="relative w-full h-24 bg-muted/40 flex flex-col items-center justify-center p-3 text-center">
-              <div className="h-8 w-8 rounded-md bg-secondary/80 flex items-center justify-center mb-1">
-                {getFileIcon(doc.file_type, "h-4 w-4")}
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                Document preview available on download
-              </p>
-            </div>
-          )}
+      {/* ── Deleted notice ── */}
+      {doc.file_deleted && (
+        <div className="mx-3 mt-2.5 p-2 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+          <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+          <p className="text-[10px] text-destructive leading-snug">
+            This file has been permanently removed from storage.
+          </p>
         </div>
       )}
 
-      {/* Structured Details Grid */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
-          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
-            <Calendar className="h-3 w-3" />
-            <span className="text-[9px] font-medium uppercase">Date</span>
+      {/* ── 4 Key Metadata Cards ── */}
+      <div className="p-3 grid grid-cols-1 gap-1.5">
+
+        {/* Date Uploaded */}
+        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40 hover:bg-secondary/60 transition-colors">
+          <div className="h-6 w-6 rounded-md bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+            <Calendar className="h-3 w-3 text-amber-500" />
           </div>
-          <p className="text-[11px] font-medium text-foreground truncate">
-            {formatDate(doc.created_at)}
-          </p>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Date Uploaded</p>
+            <p className="text-[11px] font-medium text-foreground mt-0.5 truncate">{formatDate(doc.created_at)}</p>
+          </div>
         </div>
 
-        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
-          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
-            <HardDrive className="h-3 w-3" />
-            <span className="text-[9px] font-medium uppercase">Size</span>
+        {/* File Size */}
+        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40 hover:bg-secondary/60 transition-colors">
+          <div className="h-6 w-6 rounded-md bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+            <HardDrive className="h-3 w-3 text-emerald-500" />
           </div>
-          <p className="text-[11px] font-medium text-foreground truncate">
-            {formatFileSize(fileSize)}
-          </p>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">File Size</p>
+            <p className="text-[11px] font-medium text-foreground mt-0.5 truncate">{formatFileSize(fileSize)}</p>
+          </div>
         </div>
 
-        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
-          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
-            <Tag className="h-3 w-3" />
-            <span className="text-[9px] font-medium uppercase">Subject</span>
+        {/* Subject */}
+        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40 hover:bg-secondary/60 transition-colors">
+          <div className="h-6 w-6 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+            <Tag className="h-3 w-3 text-primary" />
           </div>
-          <p className="text-[11px] font-medium text-foreground truncate">
-            {subject?.name || doc.ai_subject || "Unassigned"}
-          </p>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Subject</p>
+            <p className="text-[11px] font-medium text-foreground mt-0.5 truncate">
+              {subject?.name || doc.ai_subject || <span className="italic text-muted-foreground">Unassigned</span>}
+            </p>
+          </div>
         </div>
 
-        <div className="bg-secondary/30 rounded-lg px-2.5 py-2 border border-border/30">
-          <div className="flex items-center gap-1 text-muted-foreground mb-0.5">
-            <Folder className="h-3 w-3" />
-            <span className="text-[9px] font-medium uppercase">Folder</span>
+        {/* Folder */}
+        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40 hover:bg-secondary/60 transition-colors">
+          <div className="h-6 w-6 rounded-md bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+            <Folder className="h-3 w-3 text-blue-500" />
           </div>
-          <p className="text-[11px] font-medium text-foreground truncate">
-            {doc.ai_topic || "Lectures"}
-          </p>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Folder</p>
+            <p className="text-[11px] font-medium text-foreground mt-0.5 truncate">{doc.ai_topic || "Lectures"}</p>
+          </div>
         </div>
+
+        {/* Date Deleted (only shown for deleted files) */}
+        {doc.file_deleted && doc.deleted_at && (
+          <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-destructive/10 border border-destructive/20 hover:bg-destructive/15 transition-colors">
+            <div className="h-6 w-6 rounded-md bg-destructive/15 border border-destructive/30 flex items-center justify-center shrink-0">
+              <Calendar className="h-3 w-3 text-destructive" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[9px] font-semibold text-destructive uppercase tracking-wider">Date Deleted</p>
+              <p className="text-[11px] font-medium text-destructive mt-0.5 truncate">{formatDate(doc.deleted_at)}</p>
+            </div>
+          </div>
+        )}
+
       </div>
-
-      {/* Processing Status Banner */}
-      <div className="p-2 rounded-lg bg-secondary/40 border border-border/30 flex items-center justify-between text-xs">
-        <span className="text-[11px] text-muted-foreground">Status</span>
-        <div>{getStatusBadge(doc.summary_status, doc.quiz_status, doc.classification_status)}</div>
-      </div>
-
-      {/* Action Shortcuts */}
-      <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-border/30">
-        <Button
-          variant="outline"
-          size="sm"
-          className="text-xs h-7 cursor-pointer gap-1"
-          onClick={() => doc.file_url && window.open(doc.file_url, "_blank")}
-          disabled={!doc.file_url}
-        >
-          <ExternalLink className="h-3 w-3" />
-          Open File
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="text-xs h-7 cursor-pointer gap-1"
-          onClick={() => onNavigate(`/assistant?documentId=${doc.id}`)}
-        >
-          <BrainCircuit className="h-3 w-3" />
-          Study AI
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="text-xs h-7 cursor-pointer gap-1"
-          onClick={() => onNavigate(`/uploads/${doc.id}/summary`)}
-        >
-          <ScrollText className="h-3 w-3" />
-          Summary
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="text-xs h-7 cursor-pointer gap-1"
-          onClick={() => onNavigate(`/uploads/${doc.id}/quiz`)}
-        >
-          <HelpCircle className="h-3 w-3" />
-          Quiz
-        </Button>
-      </div>
-
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full text-xs h-7 text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer gap-1"
-        onClick={() => onDelete(doc.id)}
-      >
-        <Trash2 className="h-3 w-3" />
-        Move to Recycle Bin
-      </Button>
     </div>
   );
 }
@@ -1183,6 +1259,8 @@ function UploadHistorySection({
   const [page, setPage] = useState(1);
   const [detailDocId, setDetailDocId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [generatingDocId, setGeneratingDocId] = useState<string | null>(null);
+  const [navigatingSummaryId, setNavigatingSummaryId] = useState<string | null>(null);
 
   // Subject lookup map
   const subjectMap = useMemo(() => {
@@ -1218,14 +1296,13 @@ function UploadHistorySection({
       }
 
       // Status filter
-      if (statusFilter === "completed") {
+      if (statusFilter === "deleted") {
+        if (!d.file_deleted) return false;
+      } else if (d.file_deleted) {
+        if (statusFilter !== "all") return false;
+      } else if (statusFilter === "completed") {
         const isCompleted =
-          (d.summary_status === "completed" ||
-            d.summary_status === "pending" ||
-            d.summary_status === null) &&
-          d.quiz_status !== "processing" &&
-          d.quiz_status !== "failed" &&
-          d.classification_status !== "needs_review";
+          d.summary_status === "completed" || d.quiz_status === "completed";
         if (!isCompleted) return false;
       } else if (statusFilter === "processing") {
         const isProcessing =
@@ -1304,6 +1381,52 @@ function UploadHistorySection({
     router.push(path);
   };
 
+  const handleSummaryAction = async (doc: DocumentRow) => {
+    setNavigatingSummaryId(doc.id);
+    try {
+      const result = await getSummaryFileLocationAction(doc.id);
+      if (result.success && result.subjectId) {
+        const targetUrl = result.folderId
+          ? `/subjects/${result.subjectId}?folder=${result.folderId}&select=${result.fileId || doc.id}`
+          : `/subjects/${result.subjectId}?select=${result.fileId || doc.id}`;
+        handleNavigate(targetUrl);
+      } else if (result.viewerUrl) {
+        handleNavigate(result.viewerUrl);
+      } else {
+        handleNavigate(`/uploads/${doc.id}/summary`);
+      }
+    } catch (err) {
+      console.warn("Failed to resolve summary location, falling back:", err);
+      handleNavigate(`/uploads/${doc.id}/summary`);
+    } finally {
+      setNavigatingSummaryId(null);
+    }
+  };
+
+  const handleRegenerateSummary = async (doc: DocumentRow) => {
+    if (!doc.file_url) return;
+    setGeneratingDocId(doc.id);
+    try {
+      await fetch("/api/generate-study-pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documentId: doc.id,
+          fileUrl: doc.file_url,
+          fileType: doc.file_type || "pdf",
+          force: true,
+        }),
+      });
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (err) {
+      console.error("Failed to regenerate summary:", err);
+    } finally {
+      setTimeout(() => setGeneratingDocId(null), 1500);
+    }
+  };
+
   const handleResetFilters = () => {
     setSearch("");
     setFormatFilter("all");
@@ -1318,12 +1441,12 @@ function UploadHistorySection({
   ) => (
     <th
       className={cn(
-        "px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors",
+        "px-4 py-3 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors",
         className
       )}
       onClick={() => handleSort(sortKeyVal)}
     >
-      <span className="flex items-center gap-1">
+      <span className="flex items-center gap-1.5">
         {label}
         {sortKey === sortKeyVal ? (
           sortDir === "asc" ? (
@@ -1332,7 +1455,7 @@ function UploadHistorySection({
             <ChevronDown className="h-3 w-3 text-primary" />
           )
         ) : (
-          <ChevronUp className="h-3 w-3 text-muted-foreground/30" />
+          <ChevronUp className="h-3 w-3 opacity-20" />
         )}
       </span>
     </th>
@@ -1432,7 +1555,9 @@ function UploadHistorySection({
                       ? "Processing"
                       : statusFilter === "needs_review"
                       ? "Needs Review"
-                      : "Failed"}
+                      : statusFilter === "failed"
+                      ? "Failed"
+                      : "File Deleted"}
                   </span>
                   <ChevronDown className="h-3 w-3 opacity-60" />
                 </Button>
@@ -1493,6 +1618,16 @@ function UploadHistorySection({
                 >
                   Failed
                 </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={statusFilter === "deleted"}
+                  onCheckedChange={() => {
+                    setStatusFilter("deleted");
+                    setPage(1);
+                  }}
+                  className="text-xs cursor-pointer text-destructive focus:text-destructive"
+                >
+                  File Deleted
+                </DropdownMenuCheckboxItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1547,100 +1682,130 @@ function UploadHistorySection({
           )}
         </div>
       ) : (
-        <div className="flex gap-4">
+        <div className="flex flex-col lg:flex-row items-start gap-4 w-full">
           {/* Table Container */}
-          <div className="flex-1 min-w-0 rounded-xl border border-border/60 bg-card/50 overflow-hidden shadow-sm">
+          <div className="flex-1 min-w-0 w-full rounded-2xl border border-border/60 bg-card overflow-hidden shadow-lg shadow-black/5">
             {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
-                <thead className="border-b border-border/50 bg-muted/30">
-                  <tr>
-                    {renderSortHeader("name", "FILE", "min-w-[220px]")}
-                    {renderSortHeader("subject", "SUBJECT", "min-w-[140px]")}
-                    {renderSortHeader("type", "TYPE", "w-20")}
-                    {renderSortHeader("date", "DATE", "min-w-[110px]")}
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground min-w-[100px]">
+            <div className="hidden md:block">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-border/60 bg-muted/50">
+                    {renderSortHeader("name", "FILE", "w-auto min-w-[150px]")}
+                    {renderSortHeader("subject", "SUBJECT", "w-[140px]")}
+                    {renderSortHeader("type", "TYPE", "w-[65px]")}
+                    {renderSortHeader("date", "DATE", "w-[105px]")}
+                    <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-widest w-[100px]">
                       STATUS
                     </th>
-                    <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-muted-foreground w-16">
+                    <th className="px-3 py-2.5 text-right text-[10px] font-bold text-muted-foreground uppercase tracking-widest w-12">
                       ACTIONS
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/30">
+                <tbody className="divide-y divide-border/40">
                   {paginated.map((doc) => {
                     const subjectName = doc.subject_id
                       ? subjectMap.get(doc.subject_id)
                       : doc.ai_subject;
                     const isDeleting = deletingId === doc.id;
                     const isSelected = detailDocId === doc.id;
+                    const rawExt = (doc.file_type || "").toLowerCase();
+
+                    // Only show AI study tools for lecture files
+                    const isLectureFile = /lecture/i.test(doc.ai_topic || "");
 
                     return (
                       <tr
                         key={doc.id}
                         className={cn(
-                          "group transition-colors duration-100",
+                          "group transition-all duration-150 cursor-default",
                           isSelected
-                            ? "bg-primary/5"
-                            : "hover:bg-muted/30"
+                            ? "bg-primary/6 border-l-2 border-l-primary"
+                            : "hover:bg-muted/40 border-l-2 border-l-transparent",
+                          doc.file_deleted && "opacity-60"
                         )}
                       >
-                        {/* File Name & Preview Trigger */}
-                        <td className="px-4 py-2.5">
+                        {/* File Name */}
+                        <td className="px-3 py-2.5">
                           <button
                             type="button"
-                            onClick={() =>
-                              setDetailDocId(isSelected ? null : doc.id)
-                            }
-                            aria-label={`Preview ${doc.title}`}
-                            className="flex items-center gap-2.5 text-left w-full group/name cursor-pointer"
+                            onClick={() => setDetailDocId(isSelected ? null : doc.id)}
+                            aria-label={`View details for ${doc.title}`}
+                            className="flex items-center gap-2.5 text-left w-full cursor-pointer group/row"
                           >
-                            <div className="h-7 w-7 rounded-md bg-secondary/80 border border-border/30 flex items-center justify-center shrink-0">
-                              {getFileIcon(doc.file_type)}
+                            <div className={cn(
+                              "h-7 w-7 rounded-lg flex items-center justify-center shrink-0 border transition-all",
+                              rawExt === "pdf" ? "bg-rose-500/10 border-rose-500/20" :
+                              rawExt === "docx" || rawExt === "doc" ? "bg-blue-500/10 border-blue-500/20" :
+                              rawExt === "pptx" || rawExt === "ppt" ? "bg-amber-500/10 border-amber-500/20" :
+                              isImageType(rawExt) ? "bg-violet-500/10 border-violet-500/20" :
+                              "bg-secondary border-border/40"
+                            )}>
+                              {getFileIcon(doc.file_type, "h-3.5 w-3.5")}
                             </div>
-                            <span
-                              className="text-xs font-medium text-foreground truncate max-w-[200px] group-hover/name:text-primary transition-colors"
-                              title={doc.title}
-                            >
-                              {doc.title}
-                            </span>
+                            <div className="min-w-0">
+                              <span
+                                className={cn(
+                                  "text-xs font-semibold block truncate max-w-[170px] lg:max-w-[220px] transition-colors",
+                                  doc.file_deleted
+                                    ? "text-muted-foreground line-through"
+                                    : "text-foreground group-hover/row:text-primary"
+                                )}
+                                title={doc.title}
+                              >
+                                {doc.title}
+                              </span>
+                              {isSelected && (
+                                <span className="text-[9px] font-semibold text-primary/70 uppercase tracking-wider">Details open</span>
+                              )}
+                            </div>
                           </button>
                         </td>
 
                         {/* Subject */}
-                        <td className="px-4 py-2.5">
-                          <span className="text-xs text-muted-foreground truncate max-w-[130px] block">
-                            {subjectName || (
-                              <span className="italic opacity-60">Unassigned</span>
-                            )}
-                          </span>
+                        <td className="px-3 py-2.5">
+                          {subjectName ? (
+                            <span className="text-xs font-medium text-foreground/80 truncate max-w-[125px] block">
+                              {subjectName}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] italic text-muted-foreground/60">Unassigned</span>
+                          )}
                         </td>
 
-                        {/* Type */}
-                        <td className="px-4 py-2.5">
-                          <span className="text-[10px] font-semibold uppercase text-muted-foreground bg-secondary/70 border border-border/30 px-1.5 py-0.5 rounded">
+                        {/* Type badge */}
+                        <td className="px-3 py-2.5">
+                          <span className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border",
+                            rawExt === "pdf" ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20" :
+                            rawExt === "docx" || rawExt === "doc" ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20" :
+                            rawExt === "pptx" || rawExt === "ppt" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" :
+                            isImageType(rawExt) ? "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20" :
+                            "bg-secondary text-muted-foreground border-border/40"
+                          )}>
                             {doc.file_type?.toUpperCase() || "—"}
                           </span>
                         </td>
 
                         {/* Date */}
-                        <td className="px-4 py-2.5">
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
                             {formatDate(doc.created_at)}
                           </span>
                         </td>
 
                         {/* Status */}
-                        <td className="px-4 py-2.5">
+                        <td className="px-3 py-2.5">
                           {getStatusBadge(
                             doc.summary_status,
                             doc.quiz_status,
-                            doc.classification_status
+                            doc.classification_status,
+                            doc.file_deleted
                           )}
                         </td>
 
                         {/* Actions */}
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="px-3 py-2.5 text-right">
                           {isDeleting ? (
                             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground ml-auto" />
                           ) : (
@@ -1650,7 +1815,7 @@ function UploadHistorySection({
                                   <button
                                     type="button"
                                     aria-label={`Actions for ${doc.title}`}
-                                    className="h-7 w-7 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 ml-auto"
+                                    className="h-7 w-7 rounded-lg hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 ml-auto border border-transparent hover:border-border/50"
                                   >
                                     <MoreHorizontal className="h-4 w-4" />
                                   </button>
@@ -1658,77 +1823,111 @@ function UploadHistorySection({
                               />
                               <DropdownMenuContent
                                 align="end"
-                                className="w-44 bg-card/98 border border-border/70 shadow-lg"
+                                className="w-48 bg-card/98 border border-border/70 shadow-xl shadow-black/10 rounded-xl"
                               >
                                 <DropdownMenuItem
                                   className="text-xs cursor-pointer"
                                   onClick={() => setDetailDocId(doc.id)}
                                 >
                                   <Eye className="h-3.5 w-3.5 mr-2" />
-                                  Preview File
+                                  View Details
                                 </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  className="text-xs cursor-pointer"
-                                  onClick={() =>
-                                    doc.file_url &&
-                                    window.open(
-                                      doc.file_url,
-                                      "_blank",
-                                      "noopener,noreferrer"
-                                    )
-                                  }
-                                >
-                                  <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                                  Open File
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  className="text-xs cursor-pointer"
-                                  onClick={() =>
-                                    doc.file_url &&
-                                    window.open(doc.file_url, "_blank")
-                                  }
-                                >
-                                  <Download className="h-3.5 w-3.5 mr-2" />
-                                  Download
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  className="text-xs cursor-pointer"
-                                  onClick={() =>
-                                    handleNavigate(
-                                      `/assistant?documentId=${doc.id}`
-                                    )
-                                  }
-                                >
-                                  <BrainCircuit className="h-3.5 w-3.5 mr-2" />
-                                  Study with AI
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  className="text-xs cursor-pointer"
-                                  onClick={() =>
-                                    handleNavigate(`/uploads/${doc.id}/summary`)
-                                  }
-                                >
-                                  <ScrollText className="h-3.5 w-3.5 mr-2" />
-                                  Summary
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  className="text-xs cursor-pointer"
-                                  onClick={() =>
-                                    handleNavigate(`/uploads/${doc.id}/quiz`)
-                                  }
-                                >
-                                  <HelpCircle className="h-3.5 w-3.5 mr-2" />
-                                  Quiz
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  className="text-xs cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
-                                  onClick={() => handleDelete(doc.id)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 mr-2" />
-                                  Move to Recycle Bin
-                                </DropdownMenuItem>
+
+                                {!doc.file_deleted ? (
+                                  <>
+                                    <DropdownMenuItem
+                                      className="text-xs cursor-pointer"
+                                      onClick={() =>
+                                        doc.file_url &&
+                                        window.open(doc.file_url, "_blank", "noopener,noreferrer")
+                                      }
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                                      Open File
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      className="text-xs cursor-pointer"
+                                      disabled={!doc.subject_id}
+                                      onClick={() => {
+                                        if (doc.subject_id) {
+                                          const targetUrl = doc.folder_id
+                                            ? `/subjects/${doc.subject_id}?folder=${doc.folder_id}&select=${doc.id}`
+                                            : `/subjects/${doc.subject_id}?select=${doc.id}`;
+                                          handleNavigate(targetUrl);
+                                        }
+                                      }}
+                                    >
+                                      <FolderOpen className="h-3.5 w-3.5 mr-2 text-primary" />
+                                      Open File Location
+                                    </DropdownMenuItem>
+
+                                    {/* AI Tools — only for lecture files */}
+                                    {isLectureFile && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          className="text-xs cursor-pointer"
+                                          onClick={() => handleNavigate(`/assistant?documentId=${doc.id}`)}
+                                        >
+                                          <BrainCircuit className="h-3.5 w-3.5 mr-2 text-violet-500" />
+                                          Study with AI
+                                        </DropdownMenuItem>
+
+                                        {doc.summary_status === "completed" ? (
+                                          <DropdownMenuItem
+                                            className="text-xs cursor-pointer"
+                                            disabled={navigatingSummaryId === doc.id}
+                                            onClick={() => handleSummaryAction(doc)}
+                                          >
+                                            {navigatingSummaryId === doc.id ? (
+                                              <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin text-primary" />
+                                            ) : (
+                                              <ScrollText className="h-3.5 w-3.5 mr-2 text-emerald-500" />
+                                            )}
+                                            Open Summary Location
+                                          </DropdownMenuItem>
+                                        ) : doc.summary_status === "processing" || generatingDocId === doc.id ? (
+                                          <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                                            <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin text-primary" />
+                                            Generating Summary…
+                                          </DropdownMenuItem>
+                                        ) : (
+                                          <DropdownMenuItem
+                                            className="text-xs cursor-pointer"
+                                            onClick={() => handleRegenerateSummary(doc)}
+                                          >
+                                            <RotateCw className="h-3.5 w-3.5 mr-2 text-amber-500" />
+                                            {doc.summary_status === "failed" ? "Regenerate Summary" : "Generate Summary"}
+                                          </DropdownMenuItem>
+                                        )}
+
+                                        <DropdownMenuItem
+                                          className="text-xs cursor-pointer"
+                                          onClick={() => handleNavigate(`/uploads/${doc.id}/quiz`)}
+                                        >
+                                          <HelpCircle className="h-3.5 w-3.5 mr-2 text-blue-500" />
+                                          Quiz
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      className="text-xs cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                                      onClick={() => handleDelete(doc.id)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                      Move to Recycle Bin
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <div className="px-2 py-1.5 text-[10px] text-muted-foreground italic">
+                                      File permanently deleted from storage.
+                                    </div>
+                                  </>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           )}
@@ -1748,13 +1947,15 @@ function UploadHistorySection({
                   : doc.ai_subject;
                 const isDeleting = deletingId === doc.id;
                 const isSelected = detailDocId === doc.id;
+                const isLectureFile = /lecture/i.test(doc.ai_topic || "");
 
                 return (
                   <div
                     key={doc.id}
                     className={cn(
                       "p-3.5 flex items-start gap-3 transition-colors",
-                      isSelected && "bg-primary/5"
+                      isSelected && "bg-primary/5",
+                      doc.file_deleted && "opacity-75 bg-muted/5"
                     )}
                   >
                     <button
@@ -1768,7 +1969,12 @@ function UploadHistorySection({
                       <button
                         type="button"
                         onClick={() => setDetailDocId(isSelected ? null : doc.id)}
-                        className="text-xs font-semibold text-foreground truncate block text-left w-full hover:text-primary transition-colors cursor-pointer"
+                        className={cn(
+                          "text-xs font-semibold truncate block text-left w-full transition-colors cursor-pointer",
+                          doc.file_deleted
+                            ? "text-muted-foreground line-through hover:text-foreground"
+                            : "text-foreground hover:text-primary"
+                        )}
                         title={doc.title}
                       >
                         {doc.title}
@@ -1790,7 +1996,8 @@ function UploadHistorySection({
                         {getStatusBadge(
                           doc.summary_status,
                           doc.quiz_status,
-                          doc.classification_status
+                          doc.classification_status,
+                          doc.file_deleted
                         )}
                       </div>
                     </div>
@@ -1811,48 +2018,109 @@ function UploadHistorySection({
                         />
                         <DropdownMenuContent
                           align="end"
-                          className="w-44 bg-card/98 border border-border/70 shadow-lg"
+                          className="w-48 bg-card/98 border border-border/70 shadow-lg"
                         >
                           <DropdownMenuItem
                             className="text-xs cursor-pointer"
                             onClick={() => setDetailDocId(doc.id)}
                           >
                             <Eye className="h-3.5 w-3.5 mr-2" />
-                            Preview File
+                            View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-xs cursor-pointer"
-                            onClick={() =>
-                              doc.file_url &&
-                              window.open(
-                                doc.file_url,
-                                "_blank",
-                                "noopener,noreferrer"
-                              )
-                            }
-                          >
-                            <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                            Open File
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-xs cursor-pointer"
-                            onClick={() =>
-                              handleNavigate(
-                                `/assistant?documentId=${doc.id}`
-                              )
-                            }
-                          >
-                            <BrainCircuit className="h-3.5 w-3.5 mr-2" />
-                            Study with AI
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-xs cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
-                            onClick={() => handleDelete(doc.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 mr-2" />
-                            Move to Recycle Bin
-                          </DropdownMenuItem>
+
+                          {!doc.file_deleted ? (
+                            <>
+                              <DropdownMenuItem
+                                className="text-xs cursor-pointer"
+                                onClick={() =>
+                                  doc.file_url &&
+                                  window.open(
+                                    doc.file_url,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  )
+                                }
+                              >
+                                <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                                Open File
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-xs cursor-pointer"
+                                disabled={!doc.subject_id}
+                                onClick={() => {
+                                  if (doc.subject_id) {
+                                    const targetUrl = doc.folder_id
+                                      ? `/subjects/${doc.subject_id}?folder=${doc.folder_id}&select=${doc.id}`
+                                      : `/subjects/${doc.subject_id}?select=${doc.id}`;
+                                    handleNavigate(targetUrl);
+                                  }
+                                }}
+                              >
+                                <FolderOpen className="h-3.5 w-3.5 mr-2 text-primary" />
+                                Open File Location
+                              </DropdownMenuItem>
+
+                              {/* AI Tools — only for lecture files */}
+                              {isLectureFile && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    className="text-xs cursor-pointer"
+                                    onClick={() =>
+                                      handleNavigate(`/assistant?documentId=${doc.id}`)
+                                    }
+                                  >
+                                    <BrainCircuit className="h-3.5 w-3.5 mr-2 text-violet-500" />
+                                    Study with AI
+                                  </DropdownMenuItem>
+
+                                  {doc.summary_status === "completed" ? (
+                                    <DropdownMenuItem
+                                      className="text-xs cursor-pointer"
+                                      disabled={navigatingSummaryId === doc.id}
+                                      onClick={() => handleSummaryAction(doc)}
+                                    >
+                                      {navigatingSummaryId === doc.id ? (
+                                        <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin text-primary" />
+                                      ) : (
+                                        <ScrollText className="h-3.5 w-3.5 mr-2 text-emerald-500" />
+                                      )}
+                                      Open Summary Location
+                                    </DropdownMenuItem>
+                                  ) : doc.summary_status === "processing" || generatingDocId === doc.id ? (
+                                    <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                                      <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin text-primary" />
+                                      Generating Summary…
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem
+                                      className="text-xs cursor-pointer"
+                                      onClick={() => handleRegenerateSummary(doc)}
+                                    >
+                                      <RotateCw className="h-3.5 w-3.5 mr-2 text-amber-500" />
+                                      {doc.summary_status === "failed" ? "Regenerate Summary" : "Generate Summary"}
+                                    </DropdownMenuItem>
+                                  )}
+                                </>
+                              )}
+
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-xs cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                                onClick={() => handleDelete(doc.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                Move to Recycle Bin
+                              </DropdownMenuItem>
+                            </>
+                          ) : (
+                            <>
+                              <DropdownMenuSeparator />
+                              <div className="px-2 py-1 text-[10px] text-muted-foreground italic leading-tight">
+                                File has been permanently deleted from storage.
+                              </div>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
@@ -1932,15 +2200,13 @@ function UploadHistorySection({
             )}
           </div>
 
-          {/* Slide-in Details & Preview Panel */}
+          {/* Right-side Details Panel (matching the Preview Panel in Subjects) */}
           {detailDoc && (
-            <div className="hidden lg:block w-80 shrink-0">
+            <div className="w-full lg:w-64 xl:w-72 shrink-0 animate-in fade-in slide-in-from-right-4 duration-200">
               <FileDetailPanel
                 doc={detailDoc}
                 subjects={subjects}
                 onClose={() => setDetailDocId(null)}
-                onDelete={handleDelete}
-                onNavigate={handleNavigate}
               />
             </div>
           )}
@@ -1962,12 +2228,64 @@ export function UploadCenter({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const supabase = useMemo(() => createClient(), []);
 
   const handleUploadComplete = useCallback(() => {
     startTransition(() => {
       router.refresh();
     });
   }, [router]);
+
+  // Real-time listener: automatically refresh when documents, summaries, or tasks update in Supabase
+  useEffect(() => {
+    const channel = supabase
+      .channel("upload-center-live-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "documents" },
+        () => {
+          startTransition(() => router.refresh());
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "ai_summaries" },
+        () => {
+          startTransition(() => router.refresh());
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "background_tasks" },
+        () => {
+          startTransition(() => router.refresh());
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, router]);
+
+  // Smart polling: only poll if a document is actively being processed by the AI worker
+  const hasActiveProcessing = useMemo(() => {
+    return documents.some(
+      (d) =>
+        !d.file_deleted &&
+        (d.summary_status === "processing" || d.quiz_status === "processing")
+    );
+  }, [documents]);
+
+  useEffect(() => {
+    if (!hasActiveProcessing) return;
+
+    const interval = setInterval(() => {
+      startTransition(() => router.refresh());
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [hasActiveProcessing, router]);
 
   const handleScrollToUpload = useCallback(() => {
     dropZoneRef.current?.scrollIntoView({ behavior: "smooth" });

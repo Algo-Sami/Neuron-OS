@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { notFound, redirect } from "next/navigation";
 import { FileExplorer } from "@/components/file-explorer/file-explorer";
 import { getServerPreferences } from "@/lib/preferences-server";
+import { reconcileUserDocumentMetadata } from "@/services/storage/file-metadata";
 
 interface SubjectPageProps {
   params: Promise<{ id: string }>;
@@ -19,6 +20,9 @@ export default async function SubjectDetailsPage({ params }: SubjectPageProps) {
   if (!user) {
     redirect("/login");
   }
+
+  // Non-blocking background metadata reconciliation
+  reconcileUserDocumentMetadata(supabase, user.id).catch(() => {});
 
   // Fetch subject details — try with deleted_at filter first, fall back if column doesn't exist
   let subject = null;
@@ -72,31 +76,21 @@ export default async function SubjectDetailsPage({ params }: SubjectPageProps) {
   // Fetch user preferences
   const preferences = await getServerPreferences(user.id);
 
-  return (
-    <div className="max-w-5xl mx-auto w-full pb-10 px-4 md:px-0 animate-in fade-in duration-300">
-      <div className="flex flex-col gap-1.5 border-b border-border/40 pb-5 mb-6">
-        <div className="flex items-center gap-2.5">
-          <div
-            className={`w-3.5 h-3.5 rounded-full shrink-0 opacity-75 ${subject.color && subject.color.startsWith("bg-") ? subject.color : ""}`}
-            style={subject.color && !subject.color.startsWith("bg-") ? { backgroundColor: subject.color } : { backgroundColor: "#F4C542" }}
-          />
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground select-none">
-            {subject.name}
-          </h1>
-          {subject.code && (
-            <span className="px-2 py-0.5 rounded-md bg-secondary text-[9px] font-bold text-muted-foreground uppercase tracking-wider border border-border/60 shrink-0">
-              {subject.code}
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">All your study materials and AI summaries for this course.</p>
-      </div>
+  // Format documents structure to resolve Supabase relation array mapping to DocumentItem
+  const initialDocuments = (documents || []).map((doc) => ({
+    ...doc,
+    uploads: Array.isArray(doc.uploads)
+      ? doc.uploads[0] || null
+      : doc.uploads || null
+  }));
 
+  return (
+    <div className="flex flex-col flex-1 h-full min-h-0 overflow-hidden p-3">
       <FileExplorer
         key={user.id}
         initialSubjects={subjects || []}
         initialFolders={folders || []}
-        initialDocuments={documents || []}
+        initialDocuments={initialDocuments}
         activeRoute="subjects"
         preFocusedSubjectId={subjectId}
         userId={user.id}

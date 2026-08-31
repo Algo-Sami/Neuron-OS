@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { FileExplorer } from "@/components/file-explorer/file-explorer";
 import { cleanupExpiredRecycledItems } from "@/actions/subjects";
+import { reconcileUserDocumentMetadata } from "@/services/storage/file-metadata";
 import { getServerPreferences } from "@/lib/preferences-server";
 
 export const dynamic = 'force-dynamic';
@@ -10,8 +11,9 @@ export default async function SubjectsPage() {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (user) {
-    // Fire-and-forget: do NOT await — never block page render for cleanup
+    // Fire-and-forget: do NOT await — never block page render for background maintenance
     cleanupExpiredRecycledItems(user.id).catch(() => {});
+    reconcileUserDocumentMetadata(supabase, user.id).catch(() => {});
   }
 
   // Parallel fetch all three independent queries
@@ -29,7 +31,7 @@ export default async function SubjectsPage() {
       .order('name'),
     supabase
       .from('documents')
-      .select('id, title, file_type, file_url, created_at, summary_status, quiz_status, ai_subject, ai_topic, ai_doc_type, subject_id, folder_id, deleted_at, uploads(file_size)')
+      .select('id, title, file_type, file_url, size, created_at, summary_status, quiz_status, ai_subject, ai_topic, ai_doc_type, subject_id, folder_id, deleted_at, uploads(file_size)')
       .eq('user_id', user?.id)
       .is('deleted_at', null)
       .order('created_at', { ascending: false }),

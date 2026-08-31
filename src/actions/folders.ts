@@ -271,15 +271,46 @@ export async function deleteFolderAction(folderId: string) {
   }
 
   const folderIdsList = Array.from(descendantIds);
+  const now = new Date().toISOString();
+
+  // Fetch documents inside these folders to locate associated AI generated docs
+  const { data: folderDocs } = await supabase
+    .from("documents")
+    .select("id, title, subject_id")
+    .in("folder_id", folderIdsList)
+    .eq("user_id", user.id);
 
   // 1. Move all documents in these folders to recycle bin (soft delete)
   const { error: docsError } = await supabase
     .from("documents")
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: now })
     .in("folder_id", folderIdsList)
     .eq("user_id", user.id);
 
   if (docsError) throw new Error(docsError.message || "Failed to delete files inside folder");
+
+  // 1b. Soft-delete associated AI generated documents in lockstep
+  if (folderDocs && folderDocs.length > 0) {
+    for (const doc of folderDocs) {
+      try {
+        const docShortId = doc.id.substring(0, 8);
+        await supabase
+          .from("documents")
+          .update({ deleted_at: now })
+          .eq("user_id", user.id)
+          .contains("tags", [`source_doc:${doc.id}`]);
+
+        await supabase
+          .from("documents")
+          .update({ deleted_at: now })
+          .eq("user_id", user.id)
+          .eq("ai_doc_type", "ai_generated")
+          .ilike("file_url", `%ai-gen-%${docShortId}%`);
+      } catch (aiSyncErr) {
+        console.warn("[deleteFolderAction] AI document sync soft-delete warning:", aiSyncErr);
+      }
+    }
+  }
 
   // 2. Delete the folders permanently from DB
   const { error: deleteFoldersError } = await supabase

@@ -1,10 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Upload, File, X, CheckCircle2, AlertCircle } from "lucide-react"
+import { Upload, File as FileIcon, X, CheckCircle2, AlertCircle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
-import { saveUploadMetadata } from "@/actions/uploads"
+import { saveUploadMetadata, checkDuplicateUploadAction } from "@/actions/uploads"
 import { Progress } from "@/components/ui/progress"
+import { DuplicateUploadDialog } from "@/components/uploads/duplicate-upload-dialog"
 import { cn } from "@/lib/utils"
 
 export function UploadZone({
@@ -23,6 +24,18 @@ export function UploadZone({
   const [progress, setProgress] = React.useState(0)
   const [status, setStatus] = React.useState<"idle" | "uploading" | "success" | "error">("idle")
   const [errorMsg, setErrorMsg] = React.useState("")
+  const [duplicateInfo, setDuplicateInfo] = React.useState<{
+    fileName: string;
+    suggestedCopyName: string;
+    existingFile?: {
+      id: string;
+      name: string;
+      subjectName?: string | null;
+      folderName?: string | null;
+      size?: number | null;
+      createdAt?: string;
+    };
+  } | null>(null);
 
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -71,8 +84,9 @@ export function UploadZone({
     }
   }
 
-  const handleUpload = async () => {
-    if (!file) return
+  const handleUpload = async (targetFile?: File) => {
+    const fileToUpload = targetFile || file;
+    if (!fileToUpload) return
 
     setStatus("uploading")
     setProgress(10) // Initial progress state
@@ -87,8 +101,31 @@ export function UploadZone({
         throw new Error("Please log in to upload files.")
       }
 
+      // ── 1. Duplicate preflight check before storage upload ──────────────────
+      try {
+        const dupCheck = await checkDuplicateUploadAction({
+          fileName: fileToUpload.name,
+          subjectId,
+          folderId,
+          currentSubjectId,
+        });
+
+        if (dupCheck.success && dupCheck.isDuplicate) {
+          setStatus("idle");
+          setProgress(0);
+          setDuplicateInfo({
+            fileName: fileToUpload.name,
+            suggestedCopyName: dupCheck.suggestedCopyName || `${fileToUpload.name} (1)`,
+            existingFile: dupCheck.existingFile,
+          });
+          return;
+        }
+      } catch (checkErr) {
+        console.warn("[UploadZone] Duplicate preflight check warning:", checkErr);
+      }
+
       // Clean filename for storage
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+      const cleanFileName = fileToUpload.name.replace(/[^a-zA-Z0-9.-]/g, '_')
       const filePath = `${user.id}/${Date.now()}_${cleanFileName}`
 
       setProgress(25)
@@ -98,7 +135,7 @@ export function UploadZone({
       console.log(`[UploadTiming] Supabase storage upload START: ${filePath}`);
       const { error } = await supabase.storage
         .from('documents')
-        .upload(filePath, file, {
+        .upload(filePath, fileToUpload, {
           cacheControl: '3600',
           upsert: false,
         })
@@ -116,24 +153,37 @@ export function UploadZone({
         .getPublicUrl(filePath)
 
       // Determine extension metadata
-      const extension = file.name.split('.').pop()?.toLowerCase() || 'unknown'
+      const extension = fileToUpload.name.split('.').pop()?.toLowerCase() || 'unknown'
       
       // Save metadata to the relational database securely via Server Action
       const tMeta = performance.now();
       console.log(`[UploadTiming] saveUploadMetadata START`);
       const result = await saveUploadMetadata({
-        fileName: file.name,
+        fileName: fileToUpload.name,
         fileUrl: publicUrl,
         fileType: extension,
-        fileSize: file.size,
+        fileSize: fileToUpload.size,
         subjectId,
         folderId,
         currentSubjectId,
       })
       console.log(`[UploadTiming] saveUploadMetadata END in ${(performance.now() - tMeta).toFixed(0)}ms`);
 
+      if (!result.success) {
+        if (result.code === "DUPLICATE_FILE") {
+          setStatus("idle");
+          setProgress(0);
+          setDuplicateInfo({
+            fileName: fileToUpload.name,
+            suggestedCopyName: result.suggestedCopyName || `${fileToUpload.name} (1)`,
+            existingFile: result.existingFile,
+          });
+          return;
+        }
+        throw new Error(result.message || "Failed to upload file.");
+      }
+
       // Enqueue AI study pack generation in the background.
-      // The idempotency check inside /api/generate-study-pack prevents duplicate jobs.
       if (result.documentId) {
         console.log(`[UploadTiming] Dispatching /api/generate-study-pack`);
         try {
@@ -164,7 +214,7 @@ export function UploadZone({
         
         // Notify parent component if callback provided
         if (result.documentId && onUploadComplete) {
-          onUploadComplete(result.documentId, file.name);
+          onUploadComplete(result.documentId, fileToUpload.name);
         }
       }, 1500)
 
@@ -174,6 +224,14 @@ export function UploadZone({
       setErrorMsg(err instanceof Error ? err.message : "Failed to upload file.")
     }
   }
+
+  const handleUploadAsCopy = async (copyName: string) => {
+    if (!file) return;
+    setDuplicateInfo(null);
+    const renamedFile = new File([file], copyName, { type: file.type });
+    setFile(renamedFile);
+    await handleUpload(renamedFile);
+  };
 
   return (
     <div className="w-full">
@@ -206,7 +264,7 @@ export function UploadZone({
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-3">
               <div className="h-8 w-8 rounded-lg bg-secondary/80 border border-border/40 flex items-center justify-center shrink-0">
-                <File className="h-4.5 w-4.5 text-muted-foreground" />
+                <FileIcon className="h-4.5 w-4.5 text-muted-foreground" />
               </div>
               <div className="overflow-hidden">
                 <p className="text-xs font-semibold truncate text-foreground select-none" title={file.name}>{file.name}</p>
@@ -254,13 +312,30 @@ export function UploadZone({
               </button>
               <button 
                 className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-lg hover:bg-primary/95 transition-all shadow-xs cursor-pointer"
-                onClick={handleUpload}
+                onClick={() => handleUpload()}
               >
                 Upload File
               </button>
             </div>
           )}
         </div>
+      )}
+
+      {duplicateInfo && (
+        <DuplicateUploadDialog
+          open={!!duplicateInfo}
+          fileName={duplicateInfo.fileName}
+          suggestedCopyName={duplicateInfo.suggestedCopyName}
+          existingFileInfo={duplicateInfo.existingFile}
+          onUploadAsCopy={async (copyName) => {
+            await handleUploadAsCopy(copyName);
+          }}
+          onCancel={() => {
+            setDuplicateInfo(null);
+            setFile(null);
+            setStatus("idle");
+          }}
+        />
       )}
     </div>
   );

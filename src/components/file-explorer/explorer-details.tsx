@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ExplorerItemData } from "@/types/explorer";
+import { formatFileSize } from "@/services/storage/file-metadata";
 
 interface ExplorerDetailsProps {
   selectedItems: ExplorerItemData[];
@@ -37,11 +38,7 @@ export function ExplorerDetails({
   const hasSelection = selectedItems.length > 0;
   const isMultiple = selectedItems.length > 1;
 
-  const formatSize = (bytes?: number | null) => {
-    if (bytes === 0) return "0 KB";
-    if (bytes === undefined || bytes === null) return "0.00 MB";
-    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-  };
+  const formatSize = formatFileSize;
 
   const formatDate = (dateString: string) => {
     try {
@@ -154,7 +151,7 @@ export function ExplorerDetails({
             </div>
           )}
 
-          {item.type === "file" && item.fileSize && (
+          {item.type === "file" && item.fileSize !== undefined && item.fileSize !== null && (
             <div className="flex flex-col gap-0.5 border-b border-border/10 pb-1.5">
               <span className="text-muted-foreground text-[10px]">File Size</span>
               <span className="font-semibold text-foreground">{formatSize(item.fileSize)}</span>
@@ -392,7 +389,7 @@ export function ExplorerDetails({
             </div>
           )}
 
-          {item.type === "file" && item.fileSize && (
+          {item.type === "file" && item.fileSize !== undefined && item.fileSize !== null && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">File Size:</span>
               <span className="font-semibold text-foreground">{formatSize(item.fileSize)}</span>

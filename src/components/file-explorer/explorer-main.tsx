@@ -9,16 +9,18 @@ import { cn } from "@/lib/utils";
 // ── Folder Status Badge ───────────────────────────────────────────────────────────────────
 const FolderStatusBadge = memo(function FolderStatusBadge({ item }: { item: ExplorerItemData }) {
   const [showError, setShowError] = useState(false);
-  const { taskStatus, taskStage, taskErrorMessage } = item;
+  const { taskStatus, taskStage, taskErrorMessage, aiStatus, documentCount } = item;
   if (!taskStatus) return null;
 
-  if (taskStatus === "completed" || taskStatus === "Completed") {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800/50 shrink-0">
-        <CheckCircle2 className="h-3 w-3" />
-        Ready
-      </span>
-    );
+  // Completed / Ready states or already processed items do not need a persistent badge
+  if (
+    taskStatus === "completed" ||
+    taskStatus === "Completed" ||
+    taskStatus === "Ready" ||
+    aiStatus === "processed" ||
+    ((documentCount ?? 0) > 0 && (taskStatus === "pending" || taskStatus === "Queued"))
+  ) {
+    return null;
   }
 
   if (taskStatus === "failed" || taskStatus === "Failed") {
@@ -93,14 +95,10 @@ interface ExplorerMainProps {
   onToggleFavorite?: (itemId: string, itemType: "subject" | "folder" | "file") => void;
 }
 
+import { formatFileSize, formatExplorerItemSize } from "@/services/storage/file-metadata";
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
-const formatSize = (bytes?: number | null) => {
-  if (bytes === 0) return "0 KB";
-  if (!bytes) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(2)} MB`;
-};
+const formatSize = formatFileSize;
 
 const formatDate = (dateString: string) => {
   try {
@@ -828,19 +826,14 @@ export function ExplorerMain({
                     className={cn("h-4 w-4 shrink-0", isFolder ? "text-amber-400/90" : "text-muted-foreground")}
                     color={item.color}
                   />
-                  <span className="text-[12px] font-medium text-foreground/90 truncate flex-1" title={item.name}>
+                  <span className="text-[12px] font-medium text-foreground/90 truncate" title={item.name}>
                     {item.name}
                   </span>
+                  {item.taskStatus && <FolderStatusBadge item={item} />}
                 </div>
                 <div className="flex items-center gap-4 text-[10px] text-muted-foreground/60 shrink-0">
-                  {item.taskStatus ? (
-                    <FolderStatusBadge item={item} />
-                  ) : (
-                    <>
-                      <span className="w-10 text-right">{item.type === "file" ? formatSize(item.fileSize) : "Folder"}</span>
-                      <span className="hidden md:block">{item.type === "file" && item.fileType?.toUpperCase()}</span>
-                    </>
-                  )}
+                  <span className="w-14 text-right">{formatExplorerItemSize(item.type, item.fileSize)}</span>
+                  <span className="hidden md:block w-14">{item.type === "file" ? (item.fileType?.toUpperCase() || "FILE") : "Folder"}</span>
                   {onToggleFavorite && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onToggleFavorite(item.id, item.type); }}
@@ -923,9 +916,10 @@ export function ExplorerMain({
                         color={item.color}
                         className="shrink-0 h-[18px] w-[18px]"
                       />
-                      <span className="text-[13px] font-normal text-[#1f1f1f] dark:text-[#e8e8e8] truncate flex-1" title={item.name}>
+                      <span className="text-[13px] font-normal text-[#1f1f1f] dark:text-[#e8e8e8] truncate" title={item.name}>
                         {item.name}
                       </span>
+                      {item.taskStatus && <FolderStatusBadge item={item} />}
                       {item.isFavorite && <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400 shrink-0" />}
                     </div>
                   </td>
@@ -946,15 +940,9 @@ export function ExplorerMain({
                       `${item.fileType?.toUpperCase() || "File"} File`
                     )}
                   </td>
-                  {/* Size / Status cell */}
+                  {/* Size cell */}
                   <td className="hidden sm:table-cell px-2.5 py-0.5 text-[12px] text-[#6b7280] dark:text-[#a3a3a3] text-right align-middle w-[15%]">
-                    {item.taskStatus ? (
-                      <div className="flex justify-end">
-                        <FolderStatusBadge item={item} />
-                      </div>
-                    ) : (
-                      <span className="truncate">{formatSize(item.fileSize)}</span>
-                    )}
+                    <span className="truncate">{formatExplorerItemSize(item.type, item.fileSize)}</span>
                   </td>
                 </tr>
               );
@@ -1040,23 +1028,18 @@ export function ExplorerMain({
                   )}
                 </div>
                 <div className="flex flex-col min-w-0 flex-1">
-                  <p className="text-[12px] font-semibold text-foreground/90 group-hover:text-foreground truncate pr-5" title={item.name}>
-                    {item.name}
+                  <div className="flex items-center gap-1.5 pr-5">
+                    <p className="text-[12px] font-semibold text-foreground/90 group-hover:text-foreground truncate" title={item.name}>
+                      {item.name}
+                    </p>
+                    {item.taskStatus && <FolderStatusBadge item={item} />}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">
+                    {item.type === "file"
+                      ? `${item.fileType?.toUpperCase() || "FILE"} · ${formatSize(item.fileSize)}`
+                      : `${item.type === "subject" ? "Subject" : "Folder"} · ${item.documentCount ?? 0} files`}
                   </p>
-                  {item.taskStatus ? (
-                    <div className="mt-1">
-                      <FolderStatusBadge item={item} />
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">
-                        {item.type === "file"
-                          ? `${item.fileType?.toUpperCase()} · ${formatSize(item.fileSize)}`
-                          : `${item.type === "subject" ? "Subject" : "Folder"} · ${item.documentCount ?? 0} files`}
-                      </p>
-                      <p className="text-[9px] text-muted-foreground/50 mt-0.5">{formatDate(item.createdAt)}</p>
-                    </>
-                  )}
+                  <p className="text-[9px] text-muted-foreground/50 mt-0.5">{formatDate(item.createdAt)}</p>
                 </div>
               </div>
             );

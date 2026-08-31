@@ -85,23 +85,38 @@ function ReviewDialog({
     );
   }, [doc, subjects]);
 
+  const [isCreatingNew, setIsCreatingNew] = useState<boolean>(subjects.length === 0);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
     () => initialMatchedSubject?.id || ""
+  );
+  const [newSubjectName, setNewSubjectName] = useState<string>(
+    () => (doc?.ai_subject && doc.ai_subject !== "General Study" ? doc.ai_subject : "")
   );
   const [selectedFolder, setSelectedFolder] = useState<string>(
     () => doc?.ai_topic || "Lectures"
   );
   const [customFolder, setCustomFolder] = useState<string>("");
 
+  const prevDocIdRef = React.useRef<string | null>(doc?.id || null);
+
   React.useEffect(() => {
-    if (doc) {
+    // Only reset form state if the user opened a DIFFERENT document
+    if (doc && doc.id !== prevDocIdRef.current) {
+      prevDocIdRef.current = doc.id;
       const match = subjects.find(
         (s) =>
           s.name.toLowerCase() === (doc.ai_subject || "").toLowerCase() ||
           (doc.ai_subject &&
             s.name.toLowerCase().startsWith(doc.ai_subject.toLowerCase()))
       );
-      setSelectedSubjectId(match?.id || (subjects[0]?.id ?? ""));
+      if (subjects.length === 0) {
+        setIsCreatingNew(true);
+        setNewSubjectName(doc.ai_subject && doc.ai_subject !== "General Study" ? doc.ai_subject : "");
+      } else {
+        setIsCreatingNew(!match && !subjects[0]);
+        setSelectedSubjectId(match?.id || (subjects[0]?.id ?? ""));
+        setNewSubjectName(doc.ai_subject && doc.ai_subject !== "General Study" ? doc.ai_subject : "");
+      }
       setSelectedFolder(doc.ai_topic || "Lectures");
       setCustomFolder("");
     }
@@ -109,11 +124,15 @@ function ReviewDialog({
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId);
   const effectiveFolder = customFolder.trim() || selectedFolder || "Lectures";
-  const hasSuggestion = Boolean(doc?.ai_subject && doc.ai_subject !== "General Study");
+  const effectiveSubjectName = isCreatingNew
+    ? newSubjectName.trim()
+    : selectedSubject?.name || "";
+
+  const canSave = effectiveSubjectName.length > 0;
 
   const handleSave = () => {
-    if (!doc || !selectedSubject) return;
-    onAssign(doc.id, selectedSubject.name, effectiveFolder);
+    if (!doc || !canSave) return;
+    onAssign(doc.id, effectiveSubjectName, effectiveFolder);
   };
 
   return (
@@ -125,7 +144,7 @@ function ReviewDialog({
             Confirm File Location
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground mt-1">
-            Where should this file go?
+            Where should this file go? Choose an existing subject or create a new one.
           </DialogDescription>
         </DialogHeader>
 
@@ -137,15 +156,50 @@ function ReviewDialog({
         )}
 
         <div className="flex flex-col gap-4 mt-1">
-          {/* Subject Dropdown */}
+          {/* Subject Selector / Creator */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground">
-              Subject
-            </label>
-            {subjects.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                No subjects found. Please create a subject first.
-              </p>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-foreground">
+                Subject
+              </label>
+              {subjects.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingNew(!isCreatingNew)}
+                  className="text-[11px] text-primary hover:underline font-medium cursor-pointer"
+                >
+                  {isCreatingNew ? "← Select Existing" : "+ Create New Subject"}
+                </button>
+              )}
+            </div>
+
+            {isCreatingNew || subjects.length === 0 ? (
+              <div className="space-y-1.5">
+                <Input
+                  placeholder="Enter new subject name (e.g. Programming Practices)…"
+                  value={newSubjectName}
+                  onChange={(e) => setNewSubjectName(e.target.value)}
+                  className="h-8.5 text-xs bg-background border-primary/40 focus-visible:ring-primary/40"
+                  autoFocus
+                />
+                {doc?.ai_subject && doc.ai_subject !== "General Study" && newSubjectName !== doc.ai_subject && (
+                  <button
+                    type="button"
+                    onClick={() => setNewSubjectName(doc.ai_subject || "")}
+                    className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span>Suggestion:</span>
+                    <span className="font-semibold text-primary underline">
+                      {doc.ai_subject}
+                    </span>
+                  </button>
+                )}
+                {subjects.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    This subject will be created automatically and your file will be saved inside it.
+                  </p>
+                )}
+              </div>
             ) : (
               <select
                 value={selectedSubjectId}
@@ -161,16 +215,6 @@ function ReviewDialog({
                   </option>
                 ))}
               </select>
-            )}
-            {hasSuggestion ? (
-              <p className="text-[11px] text-muted-foreground">
-                Suggested subject:{" "}
-                <span className="text-foreground font-medium">{doc?.ai_subject}</span>
-              </p>
-            ) : (
-              <p className="text-[11px] text-muted-foreground">
-                Neuron couldn't confidently identify the subject.
-              </p>
             )}
           </div>
 
@@ -220,7 +264,7 @@ function ReviewDialog({
           </Button>
           <Button
             size="sm"
-            disabled={isPending || !selectedSubjectId}
+            disabled={isPending || !canSave}
             onClick={handleSave}
             className="text-xs h-8 px-5 gap-1.5 cursor-pointer font-medium"
           >
@@ -232,7 +276,7 @@ function ReviewDialog({
             ) : (
               <>
                 <Check className="h-3.5 w-3.5" />
-                Save
+                {isCreatingNew || subjects.length === 0 ? "Create & Save" : "Save"}
               </>
             )}
           </Button>

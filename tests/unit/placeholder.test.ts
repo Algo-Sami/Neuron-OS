@@ -1,6 +1,8 @@
-// Placeholder unit test
-describe("Placeholder", () => {
-  it("should pass", () => {
-    expect(true).toBe(true);
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+
+describe('Placeholder', () => {
+  test('should pass', () => {
+    assert.strictEqual(true, true);
   });
 });

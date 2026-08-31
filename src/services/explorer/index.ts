@@ -2,13 +2,18 @@ import { BreadcrumbSegment, FolderItem } from "@/types";
 
 export function getPreviewUrl(fileUrl: string | null, fileType: string | null): string {
   if (!fileUrl) return "about:blank";
-  const ext = (fileType || "").toLowerCase();
-  if (["docx", "pptx", "xlsx", "doc", "ppt", "xls"].includes(ext)) {
+  const cleanExt = (fileType || "")
+    .toLowerCase()
+    .replace(/^\./, "")
+    .trim();
+
+  // For office documents that browsers cannot render natively, use Microsoft Office Online Viewer
+  if (["pptx", "xlsx", "doc", "ppt", "xls"].includes(cleanExt)) {
     return `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(fileUrl)}`;
   }
-  if (ext === "pdf") {
-    return `https://docs.google.com/viewer?url=${encodeURIComponent(fileUrl)}`;
-  }
+
+  // Modern browsers (Chrome, Edge, Safari, Firefox) render PDFs, images, media, etc. natively
+  // without relying on third-party proxies like Google Docs Viewer which frequently fail with "No preview available"
   return fileUrl;
 }
 

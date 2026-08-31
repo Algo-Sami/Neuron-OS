@@ -51,7 +51,7 @@ export async function dispatchStudyPackGeneration(params: DispatchParams): Promi
     // 1. Verify document exists, belongs to user, and has subject assigned
     const { data: doc, error: docErr } = await supabase
       .from('documents')
-      .select('id, subject_id')
+      .select('id, subject_id, ai_topic, folder_id, folders(name)')
       .eq('id', documentId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -64,6 +64,19 @@ export async function dispatchStudyPackGeneration(params: DispatchParams): Promi
     if (!doc.subject_id) {
       logger.error('[Dispatcher] Document lacks a subject_id.');
       return { success: false, status: 'error', error: 'Document lacks a subject' };
+    }
+
+    // Check if the document belongs to a Lectures folder
+    const folderName = (doc.folders as any)?.name || doc.ai_topic || '';
+    const isLectureFolder = !folderName || /lecture/i.test(folderName);
+
+    if (!isLectureFolder && !force) {
+      logger.info(`[Dispatcher] Skipping study pack dispatch for document "${documentId}" — folder is "${folderName}" (not a lecture).`);
+      return {
+        success: true,
+        status: 'completed',
+        message: `Skipping AI study pack — document is in "${folderName}" folder (only Lectures trigger automatic AI study packs).`,
+      };
     }
 
     // 2. Run stale jobs recovery watchdog (non-blocking failure)

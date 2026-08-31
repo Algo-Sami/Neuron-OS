@@ -130,7 +130,8 @@ export class FolderSyncService {
     subjectId: string,
     docTitle: string,
     pdfs: GeneratedPdfResult[],
-    subjectName: string
+    subjectName: string,
+    documentId?: string
   ): Promise<string> {
     logger.info(`[FolderSync] Synchronizing generated PDFs for user ${userId}, subject: ${subjectId}`);
 
@@ -160,6 +161,8 @@ export class FolderSyncService {
       userId, subjectId, categoryFolderId, cleanDocTitle
     );
 
+    const docTags = ['ai_generated', ...(documentId ? [`source_doc:${documentId}`] : [])];
+
     // ── 4. Register generated PDF documents under the subfolder ──────────────
     for (const pdf of pdfs) {
       const fileTitle = pdf.customFileName || `${cleanDocTitle} – ${pdf.suffixName}.pdf`;
@@ -168,11 +171,10 @@ export class FolderSyncService {
         // ── Step 4a: Check if this document link already exists ───────────────
         const { data: existingDoc, error: checkErr } = await this.supabase
           .from('documents')
-          .select('id')
+          .select('id, size, file_url, deleted_at')
           .eq('user_id', userId)
           .eq('folder_id', subFolderId)
           .ilike('title', fileTitle)
-          .is('deleted_at', null)
           .maybeSingle();
 
         if (checkErr) {
@@ -180,12 +182,30 @@ export class FolderSyncService {
         }
 
         if (existingDoc) {
-          logger.info(`[FolderSync] Resource "${fileTitle}" already synced. Skipping.`);
+          // If the existing doc has missing or 0 size, updated URL, or was previously soft-deleted, heal it immediately
+          const updatePayload: Record<string, any> = {
+            deleted_at: null,
+            updated_at: new Date().toISOString(),
+            tags: docTags,
+          };
+          if ((!existingDoc.size || existingDoc.size <= 0) && pdf.size > 0) {
+            updatePayload.size = pdf.size;
+          }
+          if (pdf.publicUrl) {
+            updatePayload.file_url = pdf.publicUrl;
+          }
+
+          await this.supabase
+            .from('documents')
+            .update(updatePayload)
+            .eq('id', existingDoc.id);
+
+          logger.info(`[FolderSync] Resource "${fileTitle}" synced/healed (size=${existingDoc.size ?? pdf.size} B).`);
           continue;
         }
 
         // ── Step 4b: Attempt atomic INSERT ────────────────────────────────────
-        logger.info(`[FolderSync] Synchronizing resource "${fileTitle}"...`);
+        logger.info(`[FolderSync] Synchronizing resource "${fileTitle}" (size=${pdf.size} B)...`);
         const { error: insErr } = await this.supabase
           .from('documents')
           .insert({
@@ -204,20 +224,35 @@ export class FolderSyncService {
             summary_status: 'none',
             quiz_status: 'none',
             size: pdf.size,
+            tags: docTags,
           });
 
         if (!insErr) {
-          logger.info(`[FolderSync] ✓ Synced "${fileTitle}"`);
+          logger.info(`[FolderSync] ✓ Synced "${fileTitle}" (size=${pdf.size} B)`);
           continue;
         }
 
         // ── Step 4c: Handle concurrent document creation (23505) ─────────────
         if (insErr.code === '23505') {
           // Another concurrent scheduler created this document link first.
-          // The DB unique constraint idx_documents_unique_folder_title prevents
-          // a duplicate — treat this as a benign race and continue as success.
+          // Update the winner's size to ensure physical metadata is stored.
+          const winnerPayload: Record<string, any> = {
+            deleted_at: null,
+            updated_at: new Date().toISOString(),
+            tags: docTags,
+          };
+          if (pdf.size > 0) winnerPayload.size = pdf.size;
+          if (pdf.publicUrl) winnerPayload.file_url = pdf.publicUrl;
+
+          await this.supabase
+            .from('documents')
+            .update(winnerPayload)
+            .eq('user_id', userId)
+            .eq('folder_id', subFolderId)
+            .ilike('title', fileTitle);
+
           logger.info(
-            `[FolderSync] Concurrent document creation detected for "${fileTitle}"; reusing existing document.`
+            `[FolderSync] Concurrent document creation detected for "${fileTitle}"; synchronized metadata with winner.`
           );
           continue;
         }

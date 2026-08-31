@@ -121,7 +121,17 @@ export async function deleteMultipleItemsAction(
         if (doc.upload_id) {
           await deleteUpload(doc.upload_id, item.id, doc.file_url);
         } else {
-          // Just delete document row if no upload log exists
+          // Just delete document row & related AI summaries if no upload log exists
+          try {
+            await supabase.from("ai_summaries").delete().eq("document_id", item.id);
+            await supabase.from("knowledge_assets").delete().eq("document_id", item.id);
+            await supabase.from("quizzes").delete().eq("document_id", item.id);
+            await supabase.from("flashcards").delete().eq("document_id", item.id);
+            await supabase.from("document_chunks").delete().eq("document_id", item.id);
+          } catch (err) {
+            console.warn("[deleteMultipleItemsAction] AI cleanup warning:", err);
+          }
+
           await supabase
             .from("documents")
             .delete()
@@ -134,6 +144,7 @@ export async function deleteMultipleItemsAction(
 
   revalidatePath("/subjects");
   revalidatePath("/uploads");
+  revalidatePath("/summaries");
   revalidatePath("/recycle-bin");
   return { success: true };
 }
@@ -168,6 +179,16 @@ export async function emptyRecycleBinAction() {
       if (doc.upload_id) {
         await deleteUpload(doc.upload_id, doc.id, doc.file_url);
       } else {
+        try {
+          await supabase.from("ai_summaries").delete().eq("document_id", doc.id);
+          await supabase.from("knowledge_assets").delete().eq("document_id", doc.id);
+          await supabase.from("quizzes").delete().eq("document_id", doc.id);
+          await supabase.from("flashcards").delete().eq("document_id", doc.id);
+          await supabase.from("document_chunks").delete().eq("document_id", doc.id);
+        } catch (err) {
+          console.warn("[emptyRecycleBinAction] AI cleanup warning:", err);
+        }
+
         await supabase
           .from("documents")
           .delete()
@@ -179,6 +200,7 @@ export async function emptyRecycleBinAction() {
 
   revalidatePath("/subjects");
   revalidatePath("/uploads");
+  revalidatePath("/summaries");
   revalidatePath("/recycle-bin");
   return { success: true };
 }
