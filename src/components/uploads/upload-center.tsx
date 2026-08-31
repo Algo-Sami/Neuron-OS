@@ -203,8 +203,8 @@ function getStatusBadge(
 ) {
   if (fileDeleted) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-destructive/10 text-destructive border border-destructive/20">
-        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-destructive/10 text-destructive border border-destructive/20 whitespace-nowrap">
+        <span className="h-1.5 w-1.5 rounded-full bg-destructive shrink-0" />
         File Deleted
       </span>
     );
@@ -212,8 +212,8 @@ function getStatusBadge(
 
   if (classificationStatus === "needs_review" || classificationStatus === "pending") {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 whitespace-nowrap">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
         Needs Review
       </span>
     );
@@ -228,31 +228,31 @@ function getStatusBadge(
 
   if (isProcessing) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
         Processing
       </span>
     );
   }
   if (isFailed) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-destructive/10 text-destructive border border-destructive/20">
-        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-destructive/10 text-destructive border border-destructive/20 whitespace-nowrap">
+        <span className="h-1.5 w-1.5 rounded-full bg-destructive shrink-0" />
         Failed
       </span>
     );
   }
   if (isCompleted) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
         Completed
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border border-border/50">
-      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border border-border/50 whitespace-nowrap">
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 shrink-0" />
       Uploaded
     </span>
   );
@@ -1385,10 +1385,10 @@ function UploadHistorySection({
     setNavigatingSummaryId(doc.id);
     try {
       const result = await getSummaryFileLocationAction(doc.id);
-      if (result.success && result.subjectId) {
+      if (result.success && result.subjectId && result.fileId && result.fileId !== doc.id) {
         const targetUrl = result.folderId
-          ? `/subjects/${result.subjectId}?folder=${result.folderId}&select=${result.fileId || doc.id}`
-          : `/subjects/${result.subjectId}?select=${result.fileId || doc.id}`;
+          ? `/subjects/${result.subjectId}?folder=${result.folderId}&select=${result.fileId}`
+          : `/subjects/${result.subjectId}?select=${result.fileId}`;
         handleNavigate(targetUrl);
       } else if (result.viewerUrl) {
         handleNavigate(result.viewerUrl);
@@ -1694,7 +1694,7 @@ function UploadHistorySection({
                     {renderSortHeader("subject", "SUBJECT", "w-[140px]")}
                     {renderSortHeader("type", "TYPE", "w-[65px]")}
                     {renderSortHeader("date", "DATE", "w-[105px]")}
-                    <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-widest w-[100px]">
+                    <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-widest w-[115px] whitespace-nowrap">
                       STATUS
                     </th>
                     <th className="px-3 py-2.5 text-right text-[10px] font-bold text-muted-foreground uppercase tracking-widest w-12">
@@ -1746,7 +1746,7 @@ function UploadHistorySection({
                             <div className="min-w-0">
                               <span
                                 className={cn(
-                                  "text-xs font-semibold block truncate max-w-[170px] lg:max-w-[220px] transition-colors",
+                                   "text-xs font-semibold block truncate max-w-[170px] lg:max-w-[220px] transition-colors",
                                   doc.file_deleted
                                     ? "text-muted-foreground line-through"
                                     : "text-foreground group-hover/row:text-primary"
@@ -1795,7 +1795,7 @@ function UploadHistorySection({
                         </td>
 
                         {/* Status */}
-                        <td className="px-3 py-2.5">
+                        <td className="px-3 py-2.5 whitespace-nowrap">
                           {getStatusBadge(
                             doc.summary_status,
                             doc.quiz_status,

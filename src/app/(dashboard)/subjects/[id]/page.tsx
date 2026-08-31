@@ -47,7 +47,7 @@ export default async function SubjectDetailsPage({ params }: SubjectPageProps) {
   }
 
   if (!subject) {
-    notFound();
+    redirect("/subjects");
   }
 
   // Fetch all active subjects

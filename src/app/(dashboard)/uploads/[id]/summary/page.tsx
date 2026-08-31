@@ -21,7 +21,7 @@ export default async function DocumentSummaryPage({ params }: PageProps) {
   }
 
   // Fetch document details and subject association
-  const { data: document } = await supabase
+  let { data: targetDoc } = await supabase
     .from('documents')
     .select('id, title, file_type, file_url, created_at, summary_status, subjects(name)')
     .eq('id', documentId)
@@ -29,8 +29,19 @@ export default async function DocumentSummaryPage({ params }: PageProps) {
     .is('deleted_at', null)
     .maybeSingle();
 
-  if (!document) {
-    notFound();
+  if (!targetDoc) {
+    // Check if document exists even if soft-deleted
+    const { data: fallbackDoc } = await supabase
+      .from('documents')
+      .select('id, title, file_type, file_url, created_at, summary_status, subjects(name)')
+      .eq('id', documentId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    targetDoc = fallbackDoc;
+  }
+
+  if (!targetDoc) {
+    redirect("/uploads");
   }
 
   // Fetch all summaries for this document to pre-load history
@@ -51,17 +62,17 @@ export default async function DocumentSummaryPage({ params }: PageProps) {
     };
   });
 
-  const subjectObj = Array.isArray(document.subjects) 
-    ? document.subjects[0] 
-    : document.subjects;
+  const subjectObj = Array.isArray(targetDoc.subjects) 
+    ? targetDoc.subjects[0] 
+    : targetDoc.subjects;
 
   const formattedDoc = {
-    id: document.id,
-    title: document.title,
-    file_type: document.file_type || "",
-    file_url: document.file_url || "",
-    created_at: document.created_at,
-    summary_status: document.summary_status || "pending",
+    id: targetDoc.id,
+    title: targetDoc.title,
+    file_type: targetDoc.file_type || "",
+    file_url: targetDoc.file_url || "",
+    created_at: targetDoc.created_at,
+    summary_status: targetDoc.summary_status || "pending",
     subjects: subjectObj ? { name: String((subjectObj as Record<string, unknown>).name) } : null
   };
 
@@ -75,7 +86,7 @@ export default async function DocumentSummaryPage({ params }: PageProps) {
         </Link>
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground truncate max-w-2xl">
-            {document.title}
+            {targetDoc.title}
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5 font-medium">
             {formattedDoc.subjects?.name || "General Notes"} • Study Materials Summary Studio

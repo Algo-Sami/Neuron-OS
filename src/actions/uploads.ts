@@ -1441,56 +1441,146 @@ export async function getSummaryFileLocationAction(documentId: string): Promise<
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false };
 
-  // 1. Check if an AI generated summary PDF file exists in documents
-  const { data: summaryDoc } = await supabase
-    .from('documents')
-    .select('id, subject_id, folder_id')
-    .eq('user_id', user.id)
-    .is('deleted_at', null)
-    .contains('tags', [`source_doc:${documentId}`])
-    .ilike('title', '%summary%')
-    .maybeSingle();
+  const defaultViewerUrl = `/uploads/${documentId}/summary`;
 
-  if (summaryDoc && summaryDoc.subject_id) {
-    return {
-      success: true,
-      subjectId: summaryDoc.subject_id,
-      folderId: summaryDoc.folder_id,
-      fileId: summaryDoc.id,
-    };
-  }
+  // Helper to verify that a subject exists and is active (not soft deleted)
+  const isSubjectActive = async (subjectId: string | null | undefined): Promise<boolean> => {
+    if (!subjectId) return false;
+    const { data: subject } = await supabase
+      .from('subjects')
+      .select('id')
+      .eq('id', subjectId)
+      .eq('user_id', user.id)
+      .is('deleted_at', null)
+      .maybeSingle();
+    return !!subject;
+  };
 
-  // 2. Check if the parent document exists and has summary completed
+  // Helper to verify that a folder exists
+  const isFolderActive = async (folderId: string | null | undefined): Promise<boolean> => {
+    if (!folderId) return false;
+    const { data: folder } = await supabase
+      .from('folders')
+      .select('id')
+      .eq('id', folderId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    return !!folder;
+  };
+
+  // Fetch parent document details
   const { data: parentDoc } = await supabase
     .from('documents')
-    .select('id, subject_id, folder_id, summary_status')
+    .select('id, title, subject_id, folder_id, summary_status')
     .eq('id', documentId)
     .eq('user_id', user.id)
     .maybeSingle();
 
-  const { data: aiSummary } = await supabase
-    .from('ai_summaries')
-    .select('id')
-    .eq('document_id', documentId)
-    .maybeSingle();
+  // Strategy 1: Check if an AI generated summary PDF file exists in documents with source_doc tag
+  const { data: taggedSummaryDocs } = await supabase
+    .from('documents')
+    .select('id, title, subject_id, folder_id')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .contains('tags', [`source_doc:${documentId}`]);
 
-  if (aiSummary || parentDoc?.summary_status === 'completed') {
-    if (parentDoc?.subject_id) {
-      return {
-        success: true,
-        subjectId: parentDoc.subject_id,
-        folderId: parentDoc.folder_id,
-        fileId: parentDoc.id,
-        viewerUrl: `/uploads/${documentId}/summary`,
-      };
+  if (taggedSummaryDocs && taggedSummaryDocs.length > 0) {
+    const summaryDoc = taggedSummaryDocs.find(d => /summary/i.test(d.title)) || taggedSummaryDocs[0];
+    if (summaryDoc && summaryDoc.id !== documentId) {
+      const active = await isSubjectActive(summaryDoc.subject_id);
+      if (active) {
+        const folderValid = await isFolderActive(summaryDoc.folder_id);
+        return {
+          success: true,
+          subjectId: summaryDoc.subject_id,
+          folderId: folderValid ? summaryDoc.folder_id : null,
+          fileId: summaryDoc.id,
+          viewerUrl: defaultViewerUrl,
+        };
+      }
     }
-    return {
-      success: true,
-      viewerUrl: `/uploads/${documentId}/summary`,
-    };
   }
 
-  return { success: false };
+  // Strategy 2: Check by storage URL matching document ID short hash
+  const docShortId = documentId.substring(0, 8);
+  const { data: urlMatchedDocs } = await supabase
+    .from('documents')
+    .select('id, title, subject_id, folder_id')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .eq('ai_doc_type', 'ai_generated')
+    .ilike('file_url', `%ai-gen-%${docShortId}%`);
+
+  if (urlMatchedDocs && urlMatchedDocs.length > 0) {
+    const summaryDoc = urlMatchedDocs.find(d => /summary/i.test(d.title)) || urlMatchedDocs[0];
+    if (summaryDoc && summaryDoc.id !== documentId) {
+      const active = await isSubjectActive(summaryDoc.subject_id);
+      if (active) {
+        const folderValid = await isFolderActive(summaryDoc.folder_id);
+        return {
+          success: true,
+          subjectId: summaryDoc.subject_id,
+          folderId: folderValid ? summaryDoc.folder_id : null,
+          fileId: summaryDoc.id,
+          viewerUrl: defaultViewerUrl,
+        };
+      }
+    }
+  }
+
+  // Strategy 3: Check folder hierarchy under AI Generated folders
+  if (parentDoc) {
+    const cleanTitle = parentDoc.title.replace(/\.[^/.]+$/, '').trim().toLowerCase();
+    const targetSubjectId = parentDoc.subject_id;
+
+    if (targetSubjectId) {
+      const { data: subjectFolders } = await supabase
+        .from('folders')
+        .select('id, name, parent_folder_id')
+        .eq('user_id', user.id)
+        .eq('subject_id', targetSubjectId);
+
+      if (subjectFolders && subjectFolders.length > 0) {
+        // Find document-specific subfolder matching the clean doc title
+        const matchingSubfolder = subjectFolders.find(
+          f => f.parent_folder_id !== null && f.name.trim().toLowerCase() === cleanTitle
+        );
+
+        if (matchingSubfolder) {
+          const { data: subfolderDocs } = await supabase
+            .from('documents')
+            .select('id, title, subject_id, folder_id')
+            .eq('user_id', user.id)
+            .eq('folder_id', matchingSubfolder.id)
+            .is('deleted_at', null);
+
+          if (subfolderDocs && subfolderDocs.length > 0) {
+            const summaryDoc = subfolderDocs.find(d => /summary/i.test(d.title)) || subfolderDocs[0];
+            if (summaryDoc && summaryDoc.id !== documentId) {
+              const active = await isSubjectActive(targetSubjectId);
+              if (active) {
+                return {
+                  success: true,
+                  subjectId: targetSubjectId,
+                  folderId: matchingSubfolder.id,
+                  fileId: summaryDoc.id,
+                  viewerUrl: defaultViewerUrl,
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Strategy 4: Fallback to the Summary Studio Viewer
+  // If no generated summary PDF exists in the file tree, we NEVER return the parent document file/folder.
+  // Instead we direct the user to the interactive Summary Studio.
+  return {
+    success: true,
+    viewerUrl: defaultViewerUrl,
+  };
 }
 
 
