@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import {
   generateSummaryPDF,
+  generateKeyPointsPDF,
   generateKeyConceptsPDF,
   generateDefinitionsPDF,
   generateFlashcardsPDF,
@@ -40,7 +41,16 @@ export class PDFGeneratorService {
         displayName: 'Summary',
         suffixName: 'Summary',
         fileName: 'summary.json',
-        generator: generateSummaryPDF
+        generator: generateSummaryPDF,
+        customFileName: 'Summary.pdf'
+      },
+      {
+        key: 'keyPoints',
+        displayName: 'Key Points',
+        suffixName: 'Key-Points',
+        fileName: 'key-points.json',
+        generator: generateKeyPointsPDF,
+        customFileName: 'KeyPoints.pdf'
       },
       {
         key: 'keyConcepts',
@@ -136,7 +146,8 @@ export class PDFGeneratorService {
           suffixName: job.suffixName,
           storagePath: pdfStoragePath,
           publicUrl,
-          size: pdfBuffer.length
+          size: pdfBuffer.length,
+          customFileName: job.customFileName
         });
 
         logger.info(`[PDFGeneratorService] Successfully generated & saved PDF: ${job.displayName}`);

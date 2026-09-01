@@ -291,29 +291,36 @@ export function FileExplorer({
   const [favorites, setFavorites] = useState<RecentItem[]>([]);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
 
+  // ── User-scoped localStorage keys ─────────────────────────────────────────
+  // IMPORTANT: Always prefix with userId so that Quick Access data is NEVER
+  // shared between different accounts on the same browser/device.
+  const favoritesKey = userId ? `neuron-explorer-favorites-${userId}` : null;
+  const recentKey    = userId ? `neuron-explorer-recent-${userId}`    : null;
+
   useEffect(() => {
+    if (!favoritesKey || !recentKey) return; // No user, skip loading
     const loadFromLocalStorage = () => {
       try {
-        const storedFavorites = localStorage.getItem("neuron-explorer-favorites");
+        const storedFavorites = localStorage.getItem(favoritesKey);
         if (storedFavorites) {
           const parsed = JSON.parse(storedFavorites) as RecentItem[];
           const filtered = parsed.filter(item => item.type !== "folder");
           setFavorites(filtered);
           if (filtered.length !== parsed.length) {
-            localStorage.setItem("neuron-explorer-favorites", JSON.stringify(filtered));
+            localStorage.setItem(favoritesKey, JSON.stringify(filtered));
           }
         }
       } catch {
         // Ignored
       }
       try {
-        const storedRecent = localStorage.getItem("neuron-explorer-recent");
+        const storedRecent = localStorage.getItem(recentKey);
         if (storedRecent) {
           const parsed = JSON.parse(storedRecent) as RecentItem[];
           const filtered = parsed.filter(item => item.type !== "folder");
           setRecentItems(filtered);
           if (filtered.length !== parsed.length) {
-            localStorage.setItem("neuron-explorer-recent", JSON.stringify(filtered));
+            localStorage.setItem(recentKey, JSON.stringify(filtered));
           }
         }
       } catch {
@@ -324,7 +331,8 @@ export function FileExplorer({
     // Run asynchronously in the next frame to avoid synchronous state-updates in effect warning
     const handle = requestAnimationFrame(loadFromLocalStorage);
     return () => cancelAnimationFrame(handle);
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favoritesKey, recentKey]);
   const [showQuickAccess, setShowQuickAccess] = useState(
     initialPreferences?.showQuickAccess !== undefined ? initialPreferences.showQuickAccess : true
   );
@@ -1005,10 +1013,10 @@ export function FileExplorer({
         openedAt: new Date().toISOString(),
       };
       const updated = [newItem, ...filtered].slice(0, 20);
-      localStorage.setItem("neuron-explorer-recent", JSON.stringify(updated));
+      if (recentKey) localStorage.setItem(recentKey, JSON.stringify(updated));
       return updated;
     });
-  }, []);
+  }, [recentKey]);
 
   // Toggle Favorite
   const handleToggleFavorite = useCallback((itemId: string, itemType: "subject" | "folder" | "file") => {
@@ -1031,24 +1039,24 @@ export function FileExplorer({
         };
         updated = [newItem, ...prev].slice(0, 12);
       }
-      localStorage.setItem("neuron-explorer-favorites", JSON.stringify(updated));
+      if (favoritesKey) localStorage.setItem(favoritesKey, JSON.stringify(updated));
       return updated;
     });
-  }, [rawItems, currentSubjectId, currentFolderId]);
+  }, [rawItems, currentSubjectId, currentFolderId, favoritesKey]);
 
   // Remove a specific item from Quick Access (favorites + recents)
   const handleRemoveFromQuickAccess = useCallback((itemId: string, itemType: "subject" | "folder" | "file") => {
     setFavorites((prev) => {
       const updated = prev.filter((f) => !(f.id === itemId && f.type === itemType));
-      localStorage.setItem("neuron-explorer-favorites", JSON.stringify(updated));
+      if (favoritesKey) localStorage.setItem(favoritesKey, JSON.stringify(updated));
       return updated;
     });
     setRecentItems((prev) => {
       const updated = prev.filter((r) => !(r.id === itemId && r.type === itemType));
-      localStorage.setItem("neuron-explorer-recent", JSON.stringify(updated));
+      if (recentKey) localStorage.setItem(recentKey, JSON.stringify(updated));
       return updated;
     });
-  }, []);
+  }, [favoritesKey, recentKey]);
 
   // Open handler (Double click)
   const handleOpenItem = useCallback((item: ExplorerItemData) => {
@@ -1197,13 +1205,13 @@ export function FileExplorer({
 
       setFavorites((prev) => {
         const updated = prev.filter((item) => !shouldRemoveItem(item));
-        localStorage.setItem("neuron-explorer-favorites", JSON.stringify(updated));
+        if (favoritesKey) localStorage.setItem(favoritesKey, JSON.stringify(updated));
         return updated;
       });
 
       setRecentItems((prev) => {
         const updated = prev.filter((item) => !shouldRemoveItem(item));
-        localStorage.setItem("neuron-explorer-recent", JSON.stringify(updated));
+        if (recentKey) localStorage.setItem(recentKey, JSON.stringify(updated));
         return updated;
       });
 

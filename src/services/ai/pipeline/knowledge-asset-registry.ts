@@ -141,7 +141,7 @@ export interface AssetCollection {
  * Every new asset type should define its rules here.
  * No architectural changes needed — just add a new case.
  */
-function validateAssetContent(assetType: AssetType, content: any): ValidationResult {
+export function validateAssetContent(assetType: AssetType, content: any): ValidationResult {
   const errors: string[] = [];
 
   try {
@@ -165,12 +165,22 @@ function validateAssetContent(assetType: AssetType, content: any): ValidationRes
       }
 
       case 'key_points': {
-        if (!Array.isArray(content)) {
-          errors.push('key_points_must_be_array');
-        } else if (content.length === 0) {
-          errors.push('key_points_array_is_empty');
-        } else if (!content.every((p: any) => typeof p === 'string' && p.trim().length > 0)) {
-          errors.push('all_key_points_must_be_non_empty_strings');
+        if (!content) {
+          errors.push('key_points_content_missing');
+        } else if (Array.isArray(content)) {
+          if (content.length === 0) {
+            errors.push('key_points_array_is_empty');
+          } else if (!content.every((p: any) => typeof p === 'string' && p.trim().length > 0)) {
+            errors.push('all_key_points_must_be_non_empty_strings');
+          }
+        } else if (typeof content === 'object') {
+          if (!Array.isArray(content.keyPoints) || content.keyPoints.length === 0) {
+            errors.push('key_points_must_have_at_least_one_item');
+          } else if (!content.keyPoints.every((p: any) => typeof p === 'string' && p.trim().length > 0)) {
+            errors.push('all_key_points_must_be_non_empty_strings');
+          }
+        } else {
+          errors.push('key_points_must_be_object_or_array');
         }
         break;
       }

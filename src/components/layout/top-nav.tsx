@@ -85,6 +85,10 @@ export function TopNav() {
       const supabase = createClient();
       await supabase.auth.signOut();
       setUser(null); // Clear cached user details from Zustand store
+      // Remove legacy unscoped keys so the next user on this browser starts fresh
+      localStorage.removeItem("neuron-explorer-favorites");
+      localStorage.removeItem("neuron-explorer-recent");
+      localStorage.removeItem("neuron_study_coach_last_session");
       router.push("/login");
       router.refresh();
     } catch (err) {

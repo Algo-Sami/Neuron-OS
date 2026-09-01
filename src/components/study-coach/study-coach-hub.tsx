@@ -159,6 +159,7 @@ export function StudyCoachHub({ initialData }: StudyCoachHubProps) {
             subjects={initialData.subjects} 
             lectures={initialData.lectures} 
             onReward={refreshStats}
+            userId={initialData.userId}
           />
         )}
         {activeTab === "planner" && (

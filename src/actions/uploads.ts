@@ -131,10 +131,20 @@ export async function saveUploadMetadata({
 
   const resolvedSubjectId: string | null = classification.subjectId;
   let resolvedFolderId: string | null = null;
-  const isHighConfidence = classification.confidence >= 0.90 || !!subjectId;
+
+  // A classification is high confidence when:
+  // 1. The confidence score is >= 0.90 from any layer
+  // 2. The user explicitly passed a subjectId (Layer 1 explicit selection)
+  // 3. The upload was initiated within a subject folder context (currentSubjectId passed, Layer 2)
+  // 4. The classifier used Layer 1 (explicit_selection) or Layer 2 (folder_context) —
+  //    these are always authoritative regardless of confidence score
+  const isExplicitContext = !!subjectId || !!currentSubjectId;
+  const isAuthorativeMethod = classification.method === 'explicit_selection' || classification.method === 'folder_context';
+  const isHighConfidence = classification.confidence >= 0.90 || isExplicitContext || isAuthorativeMethod;
   const classificationStatus: 'auto_applied' | 'needs_review' = isHighConfidence
     ? 'auto_applied'
     : 'needs_review';
+
 
   // 3. Resolve Folder (with parent-child nesting for Lab materials) if subject is confidently identified
   if (resolvedSubjectId) {
@@ -283,18 +293,59 @@ export async function saveUploadMetadata({
   }
 
   // 4. Insert into uploads audit table
-  const { data: uploadResult, error: uploadError } = await supabase
+  // Try with full snapshot columns first; fall back to baseline if migration not yet applied
+  let resolvedSubjectName = classification.subjectName || null;
+  if (!resolvedSubjectName && resolvedSubjectId) {
+    const { data: sub } = await supabase.from('subjects').select('name').eq('id', resolvedSubjectId).maybeSingle();
+    resolvedSubjectName = sub?.name || null;
+  }
+  let resolvedFolderName = classification.folderName || null;
+  if (!resolvedFolderName && resolvedFolderId) {
+    const { data: fold } = await supabase.from('folders').select('name').eq('id', resolvedFolderId).maybeSingle();
+    resolvedFolderName = fold?.name || null;
+  }
+
+  const baseUploadPayload = {
+    user_id: user.id,
+    file_name: fileName,
+    file_url: fileUrl,
+    file_type: fileType,
+    file_size: fileSize,
+    status: 'completed',
+  };
+
+  let uploadResult: any;
+  let uploadError: any;
+
+  // Attempt insert with extended snapshot columns
+  const { data: extData, error: extErr } = await supabase
     .from('uploads')
     .insert({
-      user_id: user.id,
-      file_name: fileName,
-      file_url: fileUrl,
-      file_type: fileType,
-      file_size: fileSize,
-      status: 'completed'
+      ...baseUploadPayload,
+      subject_id: resolvedSubjectId,
+      subject_name: resolvedSubjectName,
+      folder_id: resolvedFolderId,
+      folder_name: resolvedFolderName,
+      ai_subject: resolvedSubjectName,
+      ai_topic: classification.labSubfolderName || resolvedFolderName || 'Lectures',
     })
     .select()
-    .single()
+    .single();
+
+  if (extErr && (extErr.code === 'PGRST204' || extErr.message?.includes('schema cache') || extErr.message?.includes('column'))) {
+    // Migration not yet applied — fall back to baseline columns only
+    console.warn('[Upload Routing] Extended upload columns unavailable (migration pending), falling back to baseline insert');
+    const { data: baseData, error: baseErr } = await supabase
+      .from('uploads')
+      .insert(baseUploadPayload)
+      .select()
+      .single();
+    uploadResult = baseData;
+    uploadError = baseErr;
+  } else {
+    uploadResult = extData;
+    uploadError = extErr;
+  }
 
   if (uploadError) {
     console.error('[Upload Routing] Failed to log upload:', uploadError);
@@ -640,11 +691,14 @@ export async function deleteUpload(uploadId: string, documentId: string, fileUrl
   if (documentId) {
     let docTitle: string | null = null;
     let subjectId: string | null = null;
+    let folderId: string | null = null;
+    let aiSubject: string | null = null;
+    let aiTopic: string | null = null;
 
     try {
       const { data: doc } = await supabase
         .from('documents')
-        .select('title, subject_id')
+        .select('title, subject_id, folder_id, ai_subject, ai_topic, upload_id')
         .eq('id', documentId)
         .eq('user_id', user.id)
         .maybeSingle();
@@ -652,6 +706,10 @@ export async function deleteUpload(uploadId: string, documentId: string, fileUrl
       if (doc) {
         docTitle = doc.title;
         subjectId = doc.subject_id;
+        folderId = doc.folder_id;
+        aiSubject = doc.ai_subject;
+        aiTopic = doc.ai_topic;
+        if (!uploadId && doc.upload_id) uploadId = doc.upload_id;
       }
     } catch (fetchErr) {
       console.warn('[deleteUpload] Error fetching document info:', fetchErr);
@@ -661,18 +719,44 @@ export async function deleteUpload(uploadId: string, documentId: string, fileUrl
 
     // Delete primary document row
     await supabase.from('documents').delete().eq('id', documentId).eq('user_id', user.id);
-  }
 
-  // PRESERVE the uploads audit row — mark as deleted instead of hard-deleting.
-  if (uploadId) {
-    await supabase
-      .from('uploads')
-      .update({
-        status: 'deleted',
-        deleted_at: new Date().toISOString(),
-      })
-      .eq('id', uploadId)
-      .eq('user_id', user.id)
+    // PRESERVE the uploads audit row with subject & folder snapshots
+    if (uploadId) {
+      let subjectName = aiSubject;
+      if (!subjectName && subjectId) {
+        const { data: sub } = await supabase.from('subjects').select('name').eq('id', subjectId).maybeSingle();
+        subjectName = sub?.name || null;
+      }
+      let folderName = aiTopic;
+      if (!folderName && folderId) {
+        const { data: fold } = await supabase.from('folders').select('name').eq('id', folderId).maybeSingle();
+        folderName = fold?.name || null;
+      }
+
+      const { error: updExtErr } = await supabase
+        .from('uploads')
+        .update({
+          status: 'deleted',
+          deleted_at: new Date().toISOString(),
+          subject_id: subjectId,
+          subject_name: subjectName,
+          folder_id: folderId,
+          folder_name: folderName,
+          ai_subject: subjectName,
+          ai_topic: folderName,
+        })
+        .eq('id', uploadId)
+        .eq('user_id', user.id);
+
+      if (updExtErr && (updExtErr.code === 'PGRST204' || updExtErr.message?.includes('schema cache') || updExtErr.message?.includes('column'))) {
+        // Migration not yet applied — fall back to baseline
+        await supabase
+          .from('uploads')
+          .update({ status: 'deleted', deleted_at: new Date().toISOString() })
+          .eq('id', uploadId)
+          .eq('user_id', user.id);
+      }
+    }
   }
 
   revalidatePath('/uploads')
@@ -697,7 +781,7 @@ export async function deletePendingUpload(documentId: string) {
   // 1. Verify document belongs to current user
   const { data: doc, error: fetchErr } = await supabase
     .from('documents')
-    .select('id, title, subject_id, upload_id, file_url, user_id')
+    .select('id, title, subject_id, folder_id, ai_subject, ai_topic, upload_id, file_url, user_id')
     .eq('id', documentId)
     .eq('user_id', user.id)
     .maybeSingle();
@@ -745,17 +829,42 @@ export async function deletePendingUpload(documentId: string) {
     throw new Error('Unable to delete this upload. Please try again.');
   }
 
-  // 5. PRESERVE the uploads audit row — mark as deleted instead of hard-deleting.
+  // 5. PRESERVE the uploads audit row with subject & folder snapshots
   if (doc.upload_id) {
     try {
-      await supabase
+      let subjectName = doc.ai_subject;
+      if (!subjectName && doc.subject_id) {
+        const { data: sub } = await supabase.from('subjects').select('name').eq('id', doc.subject_id).maybeSingle();
+        subjectName = sub?.name || null;
+      }
+      let folderName = doc.ai_topic;
+      if (!folderName && doc.folder_id) {
+        const { data: fold } = await supabase.from('folders').select('name').eq('id', doc.folder_id).maybeSingle();
+        folderName = fold?.name || null;
+      }
+
+      const { error: updExtErr } = await supabase
         .from('uploads')
         .update({
           status: 'deleted',
           deleted_at: new Date().toISOString(),
+          subject_id: doc.subject_id,
+          subject_name: subjectName,
+          folder_id: doc.folder_id,
+          folder_name: folderName,
+          ai_subject: subjectName,
+          ai_topic: folderName,
         })
         .eq('id', doc.upload_id)
         .eq('user_id', user.id);
+
+      if (updExtErr && (updExtErr.code === 'PGRST204' || updExtErr.message?.includes('schema cache') || updExtErr.message?.includes('column'))) {
+        await supabase
+          .from('uploads')
+          .update({ status: 'deleted', deleted_at: new Date().toISOString() })
+          .eq('id', doc.upload_id)
+          .eq('user_id', user.id);
+      }
     } catch (uploadDelErr) {
       console.warn('[deletePendingUpload] Upload audit record mark-deleted warning:', uploadDelErr);
     }
@@ -777,7 +886,7 @@ export async function confirmAIClassification(documentId: string) {
   // 1. Fetch document suggested fields
   const { data: doc, error: docError } = await supabase
     .from('documents')
-    .select('id, title, ai_subject, ai_topic, classification_confidence, file_url, file_type')
+    .select('id, title, ai_subject, ai_topic, classification_confidence, file_url, file_type, upload_id')
     .eq('id', documentId)
     .eq('user_id', user.id)
     .single();
@@ -848,7 +957,7 @@ export async function confirmAIClassification(documentId: string) {
     folderId = newFolder.id;
   }
 
-  // 4. Update Document
+  // 4. Update Document & sync Uploads audit record
   const { error: updateError } = await supabase
     .from('documents')
     .update({
@@ -861,6 +970,22 @@ export async function confirmAIClassification(documentId: string) {
     .eq('user_id', user.id);
 
   if (updateError) throw updateError;
+
+  // Sync to uploads audit record if linked
+  if (doc.upload_id) {
+    await supabase
+      .from('uploads')
+      .update({
+        subject_id: subjectId,
+        subject_name: suggestedSubject,
+        folder_id: folderId,
+        folder_name: suggestedTopic,
+        ai_subject: suggestedSubject,
+        ai_topic: suggestedTopic,
+      })
+      .eq('id', doc.upload_id)
+      .eq('user_id', user.id);
+  }
 
   // 5. Record classification event & learn confirmed alias
   ClassificationLearningService.recordEvent(supabase, {
@@ -915,7 +1040,7 @@ export async function rejectOrCustomizeClassification(
   // Fetch document for title and original predicted subject
   const { data: doc } = await supabase
     .from('documents')
-    .select('id, title, ai_subject, subject_id, classification_confidence, file_url, file_type')
+    .select('id, title, ai_subject, subject_id, classification_confidence, file_url, file_type, upload_id')
     .eq('id', documentId)
     .eq('user_id', user.id)
     .single();
@@ -982,7 +1107,7 @@ export async function rejectOrCustomizeClassification(
     folderId = newFolder.id;
   }
 
-  // 3. Update Document
+  // 3. Update Document & sync Uploads audit record
   const { error: updateError } = await supabase
     .from('documents')
     .update({
@@ -997,6 +1122,22 @@ export async function rejectOrCustomizeClassification(
     .eq('user_id', user.id);
 
   if (updateError) throw updateError;
+
+  // Sync to uploads audit record if linked
+  if (doc?.upload_id) {
+    await supabase
+      .from('uploads')
+      .update({
+        subject_id: subjectId,
+        subject_name: cleanSubject,
+        folder_id: folderId,
+        folder_name: cleanTopic,
+        ai_subject: cleanSubject,
+        ai_topic: cleanTopic,
+      })
+      .eq('id', doc.upload_id)
+      .eq('user_id', user.id);
+  }
 
   // 4. Record classification event & learn user correction alias
   ClassificationLearningService.recordEvent(supabase, {
@@ -1050,14 +1191,25 @@ export async function renameDocument(documentId: string, newTitle: string) {
     throw new Error("Unauthorized");
   }
 
-  const { error } = await supabase
+  const trimmed = newTitle.trim();
+  const { data: doc, error } = await supabase
     .from("documents")
-    .update({ title: newTitle.trim() })
+    .update({ title: trimmed })
     .eq("id", documentId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select("upload_id")
+    .maybeSingle();
 
   if (error) {
     throw new Error(error.message || "Failed to rename document");
+  }
+
+  if (doc?.upload_id) {
+    await supabase
+      .from("uploads")
+      .update({ file_name: trimmed })
+      .eq("id", doc.upload_id)
+      .eq("user_id", user.id);
   }
 
   revalidatePath("/uploads");
@@ -1250,7 +1402,7 @@ export async function deleteDocumentPermanently(documentId: string) {
 
   const { data: doc } = await supabase
     .from("documents")
-    .select("id, title, subject_id, upload_id, file_url")
+    .select("id, title, subject_id, folder_id, ai_subject, ai_topic, upload_id, file_url")
     .eq("id", documentId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -1290,17 +1442,42 @@ export async function deleteDocumentPermanently(documentId: string) {
     .eq("id", documentId)
     .eq("user_id", user.id);
 
-  // 4. Mark upload audit record as deleted if applicable
+  // 4. Mark upload audit record as deleted with snapshot preservation
   if (doc?.upload_id) {
     try {
-      await supabase
+      let subjectName = doc.ai_subject;
+      if (!subjectName && doc.subject_id) {
+        const { data: sub } = await supabase.from('subjects').select('name').eq('id', doc.subject_id).maybeSingle();
+        subjectName = sub?.name || null;
+      }
+      let folderName = doc.ai_topic;
+      if (!folderName && doc.folder_id) {
+        const { data: fold } = await supabase.from('folders').select('name').eq('id', doc.folder_id).maybeSingle();
+        folderName = fold?.name || null;
+      }
+
+      const { error: updExtErr } = await supabase
         .from("uploads")
         .update({
           status: "deleted",
           deleted_at: new Date().toISOString(),
+          subject_id: doc.subject_id,
+          subject_name: subjectName,
+          folder_id: doc.folder_id,
+          folder_name: folderName,
+          ai_subject: subjectName,
+          ai_topic: folderName,
         })
         .eq("id", doc.upload_id)
         .eq("user_id", user.id);
+
+      if (updExtErr && (updExtErr.code === 'PGRST204' || updExtErr.message?.includes('schema cache') || updExtErr.message?.includes('column'))) {
+        await supabase
+          .from("uploads")
+          .update({ status: "deleted", deleted_at: new Date().toISOString() })
+          .eq("id", doc.upload_id)
+          .eq("user_id", user.id);
+      }
     } catch (uploadDelErr) {
       console.warn("[deleteDocumentPermanently] Upload audit mark deleted warning:", uploadDelErr);
     }
@@ -1333,6 +1510,32 @@ export async function cleanupExpiredRecycledDocuments(userId: string) {
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         console.error("Failed to delete expired recycled document storage:", errorMsg);
+      }
+    }
+  }
+
+  // Also clean up any legacy orphaned documents whose subject was deleted permanently
+  const { data: userSubjects } = await supabase
+    .from("subjects")
+    .select("id")
+    .eq("user_id", userId);
+
+  const existingSubjectIds = new Set((userSubjects || []).map((s) => s.id));
+
+  const { data: allDocs } = await supabase
+    .from("documents")
+    .select("id, upload_id, file_url, subject_id")
+    .eq("user_id", userId)
+    .not("subject_id", "is", null);
+
+  if (allDocs && allDocs.length > 0) {
+    for (const d of allDocs) {
+      if (d.subject_id && !existingSubjectIds.has(d.subject_id)) {
+        try {
+          await deleteUpload(d.upload_id, d.id, d.file_url);
+        } catch (orphErr) {
+          console.warn("[cleanupExpiredRecycledDocuments] Orphaned doc cleanup warning:", orphErr);
+        }
       }
     }
   }

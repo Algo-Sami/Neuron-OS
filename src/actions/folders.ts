@@ -33,6 +33,44 @@ export async function linkFilesToFolder(
     throw new Error(error.message || "Failed to link documents");
   }
 
+  // Sync destination subject and folder to uploads audit table
+  try {
+    const { data: linkedDocs } = await supabase
+      .from("documents")
+      .select("upload_id")
+      .in("id", documentIds)
+      .eq("user_id", user.id);
+
+    const uploadIds = (linkedDocs || []).map((d) => d.upload_id).filter(Boolean);
+    if (uploadIds.length > 0) {
+      let subjectName: string | null = null;
+      let folderName: string | null = null;
+      if (subjectId) {
+        const { data: sub } = await supabase.from("subjects").select("name").eq("id", subjectId).maybeSingle();
+        subjectName = sub?.name || null;
+      }
+      if (folderId) {
+        const { data: fold } = await supabase.from("folders").select("name").eq("id", folderId).maybeSingle();
+        folderName = fold?.name || null;
+      }
+
+      await supabase
+        .from("uploads")
+        .update({
+          subject_id: subjectId,
+          subject_name: subjectName,
+          folder_id: folderId,
+          folder_name: folderName,
+          ai_subject: subjectName,
+          ai_topic: folderName,
+        })
+        .in("id", uploadIds)
+        .eq("user_id", user.id);
+    }
+  } catch (syncErr) {
+    console.warn("[linkFilesToFolder] Upload audit sync warning:", syncErr);
+  }
+
   revalidatePath(`/subjects/${subjectId}`);
   revalidatePath("/subjects");
   revalidatePath("/uploads");
@@ -408,6 +446,44 @@ export async function moveDocumentAction(
     .eq("user_id", user.id);
 
   if (error) throw new Error(error.message || "Failed to move document");
+
+  // Sync destination subject and folder to uploads audit table
+  try {
+    const { data: doc } = await supabase
+      .from("documents")
+      .select("upload_id")
+      .eq("id", documentId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (doc?.upload_id) {
+      let subjectName: string | null = null;
+      let folderName: string | null = null;
+      if (targetSubjectId) {
+        const { data: sub } = await supabase.from("subjects").select("name").eq("id", targetSubjectId).maybeSingle();
+        subjectName = sub?.name || null;
+      }
+      if (targetFolderId) {
+        const { data: fold } = await supabase.from("folders").select("name").eq("id", targetFolderId).maybeSingle();
+        folderName = fold?.name || null;
+      }
+
+      await supabase
+        .from("uploads")
+        .update({
+          subject_id: targetSubjectId,
+          subject_name: subjectName,
+          folder_id: targetFolderId,
+          folder_name: folderName,
+          ai_subject: subjectName,
+          ai_topic: folderName,
+        })
+        .eq("id", doc.upload_id)
+        .eq("user_id", user.id);
+    }
+  } catch (syncErr) {
+    console.warn("[moveDocumentAction] Upload audit sync warning:", syncErr);
+  }
 
   revalidatePath("/subjects");
   revalidatePath("/uploads");

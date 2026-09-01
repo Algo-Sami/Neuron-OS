@@ -659,12 +659,13 @@ function UploadArea({
           }
         };
 
-        // AI study pack dispatch check — ONLY for lecture files
+        // AI study pack dispatch check — ONLY for lecture files when subject is assigned
+        const hasValidSubject = !!result.subjectId && result.classificationStatus !== 'needs_review';
         const isLectureFolder =
           /lecture/i.test(destinationFolder || "") ||
           /lecture/i.test(classification.label || "");
 
-        if (isLectureFolder && settings.aiAutoLectures !== false) {
+        if (hasValidSubject && isLectureFolder && settings.aiAutoLectures !== false) {
           fireStudyPack();
         }
 
@@ -1275,9 +1276,7 @@ function UploadHistorySection({
       // Search by title or subject or topic
       if (search) {
         const q = search.toLowerCase();
-        const subName = d.subject_id
-          ? subjectMap.get(d.subject_id) || ""
-          : d.ai_subject || "";
+        const subName = (d.subject_id ? subjectMap.get(d.subject_id) : null) || d.ai_subject || "";
         const topicName = d.ai_topic || "";
         if (
           !d.title.toLowerCase().includes(q) &&
@@ -1334,12 +1333,8 @@ function UploadHistorySection({
       else if (sortKey === "type")
         cmp = (a.file_type || "").localeCompare(b.file_type || "");
       else if (sortKey === "subject") {
-        const sa = a.subject_id
-          ? subjectMap.get(a.subject_id) || ""
-          : a.ai_subject || "";
-        const sb = b.subject_id
-          ? subjectMap.get(b.subject_id) || ""
-          : b.ai_subject || "";
+        const sa = (a.subject_id ? subjectMap.get(a.subject_id) : null) || a.ai_subject || "";
+        const sb = (b.subject_id ? subjectMap.get(b.subject_id) : null) || b.ai_subject || "";
         cmp = sa.localeCompare(sb);
       }
       return sortDir === "asc" ? cmp : -cmp;
@@ -1704,9 +1699,7 @@ function UploadHistorySection({
                 </thead>
                 <tbody className="divide-y divide-border/40">
                   {paginated.map((doc) => {
-                    const subjectName = doc.subject_id
-                      ? subjectMap.get(doc.subject_id)
-                      : doc.ai_subject;
+                    const subjectName = (doc.subject_id ? subjectMap.get(doc.subject_id) : null) || doc.ai_subject;
                     const isDeleting = deletingId === doc.id;
                     const isSelected = detailDocId === doc.id;
                     const rawExt = (doc.file_type || "").toLowerCase();

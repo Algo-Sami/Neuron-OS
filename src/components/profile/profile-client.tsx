@@ -142,6 +142,10 @@ export function ProfileClient({
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
+      // Remove legacy unscoped keys so the next user on this browser starts fresh
+      localStorage.removeItem("neuron-explorer-favorites");
+      localStorage.removeItem("neuron-explorer-recent");
+      localStorage.removeItem("neuron_study_coach_last_session");
       router.push("/login");
       router.refresh();
     } catch (err) {

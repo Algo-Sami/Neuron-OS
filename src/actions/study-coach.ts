@@ -576,6 +576,7 @@ export async function getProductivityInsightsAction() {
 
 // 7. STUDY COACH HUB DATA AGGREGATOR
 export interface StudyCoachHubData {
+  userId: string;
   subjects: { id: string; name: string; code: string; color: string }[];
   lectures: { id: string; title: string; subject_id: string; upload_date: string }[];
   streak: number;
@@ -641,6 +642,7 @@ export async function getStudyCoachHubDataAction(): Promise<{ success: boolean; 
     return {
       success: true,
       data: {
+        userId,
         subjects: subjects || [],
         lectures: docs || [],
         streak: activity.currentStreak || 0,

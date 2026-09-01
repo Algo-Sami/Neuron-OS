@@ -27,6 +27,7 @@ interface SelfStudyTabProps {
   subjects: { id: string; name: string; code: string; color: string }[];
   lectures: { id: string; title: string; subject_id: string; upload_date: string }[];
   onReward: (xp: number) => void;
+  userId?: string;
 }
 
 export interface LastSession {
@@ -40,7 +41,7 @@ export interface LastSession {
   timestamp: number;
 }
 
-export function SelfStudyTab({ subjects, lectures, onReward }: SelfStudyTabProps) {
+export function SelfStudyTab({ subjects, lectures, onReward, userId }: SelfStudyTabProps) {
   const [selectedSubject, setSelectedSubject] = useState<string>("");
   const [selectedLecture, setSelectedLecture] = useState<string>("");
   const [topicName, setTopicName] = useState<string>("");
@@ -51,8 +52,10 @@ export function SelfStudyTab({ subjects, lectures, onReward }: SelfStudyTabProps
   const [activeStudyMode, setActiveStudyMode] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load last session cache
-    const cached = localStorage.getItem("neuron_study_coach_last_session");
+    // Load last session cache — scoped to the current user so sessions never leak between accounts
+    const sessionKey = userId ? `neuron_study_coach_last_session_${userId}` : null;
+    if (!sessionKey) return;
+    const cached = localStorage.getItem(sessionKey);
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
@@ -64,7 +67,7 @@ export function SelfStudyTab({ subjects, lectures, onReward }: SelfStudyTabProps
         // no-op
       }
     }
-  }, []);
+  }, [userId]);
 
   // Filter lectures matching subject
   const filteredLectures = lectures.filter(l => l.subject_id === selectedSubject);
@@ -85,9 +88,10 @@ export function SelfStudyTab({ subjects, lectures, onReward }: SelfStudyTabProps
       timestamp: Date.now(),
     };
     
-    localStorage.setItem("neuron_study_coach_last_session", JSON.stringify(session));
+    const sessionKey = userId ? `neuron_study_coach_last_session_${userId}` : null;
+    if (sessionKey) localStorage.setItem(sessionKey, JSON.stringify(session));
     setLastSession(session);
-  }, [selectedSubject, selectedLecture, activeSubjectObj, activeLectureObj, topicName]);
+  }, [selectedSubject, selectedLecture, activeSubjectObj, activeLectureObj, topicName, userId]);
 
   const handleLaunchMode = (modeId: string, modeName: string) => {
     if (!selectedSubject) {

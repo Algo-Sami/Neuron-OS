@@ -115,6 +115,11 @@ export function evaluateExactMatch(
 ): CandidateScore | null {
   const normFilename = normalizeFilenameTokens(rawFilename);
 
+  // Collect ALL candidate matches across all subjects, then pick the best score.
+  // This prevents a "first-match wins" bug when multiple subjects share an acronym
+  // (e.g., "PP" for both "Professional Practices" and "Parallel Programming").
+  const candidates: CandidateScore[] = [];
+
   for (const subject of userSubjects) {
     const normSubjectName = normalizeFilenameTokens(subject.name);
 
@@ -122,65 +127,71 @@ export function evaluateExactMatch(
     if (normSubjectName.length >= 2 && !isPurelyGeneric(normSubjectName)) {
       // 1a. Normalized whole equality
       if (normFilename === normSubjectName) {
-        return {
+        candidates.push({
           subjectId: subject.id,
           subjectName: subject.name,
           score: 0.96,
           method: 'exact_match',
           evidence: [`Filename directly matches subject name "${subject.name}"`],
-        };
+        });
+        continue; // No need to check further rules for this subject
       }
 
       // 1b. Word-boundary token match in raw filename (handles "PP_lecture_6.pdf", "PP-Notes.docx", etc.)
       if (matchesWordBoundary(rawFilename, subject.name)) {
-        return {
+        candidates.push({
           subjectId: subject.id,
           subjectName: subject.name,
           score: 0.95,
           method: 'exact_match',
           evidence: [`Filename contains subject name "${subject.name}" with boundary matching`],
-        };
+        });
+        continue;
       }
 
       // 1c. Normalized phrase inclusion
       if (containsPhrase(rawFilename, subject.name)) {
-        return {
+        candidates.push({
           subjectId: subject.id,
           subjectName: subject.name,
           score: 0.94,
           method: 'exact_match',
           evidence: [`Filename contains normalized phrase for subject "${subject.name}"`],
-        };
+        });
+        continue;
       }
     }
 
     // 2. Direct Subject Course Code (e.g. CS301, PP101)
     if (subject.code && subject.code.trim().length >= 2) {
       if (matchesWordBoundary(rawFilename, subject.code.trim())) {
-        return {
+        candidates.push({
           subjectId: subject.id,
           subjectName: subject.name,
           score: 0.95,
           method: 'exact_match',
           evidence: [`Filename contains subject course code "${subject.code}"`],
-        };
+        });
+        continue;
       }
     }
 
     // 3. Dynamically Generated Subject Acronym (e.g. "Parallel Programming" -> "PP", "Data Structures" -> "DS")
     const generatedAcronym = extractSubjectAcronym(subject.name);
     if (generatedAcronym && matchesWordBoundary(rawFilename, generatedAcronym)) {
-      return {
+      candidates.push({
         subjectId: subject.id,
         subjectName: subject.name,
         score: 0.93,
         method: 'exact_match',
         evidence: [`Filename matches acronym "${generatedAcronym}" for subject "${subject.name}"`],
-      };
+      });
+      continue;
     }
 
     // 4. User-specific custom / learned aliases
     const aliases = subject.aliases || [];
+    let aliasMatched = false;
     for (const alias of aliases) {
       const normAlias = normalizeFilenameTokens(alias);
       if (normAlias.length < 2 || isPurelyGeneric(normAlias)) continue;
@@ -190,17 +201,21 @@ export function evaluateExactMatch(
         matchesWordBoundary(rawFilename, alias) ||
         containsPhrase(rawFilename, alias)
       ) {
-        return {
+        candidates.push({
           subjectId: subject.id,
           subjectName: subject.name,
           score: 0.93,
           method: 'exact_match',
           evidence: [`Filename matches user alias "${alias}" for subject "${subject.name}"`],
-        };
+        });
+        aliasMatched = true;
+        break;
       }
     }
+    if (aliasMatched) continue;
 
     // 5. Legacy / System default synonyms matching against user's actual subject
+    let synonymMatched = false;
     for (const [canonicalSubject, synonyms] of Object.entries(DEFAULT_LEGACY_SYNONYMS)) {
       // Check if user subject corresponds to this canonical subject
       const isSubjectMatched =
@@ -224,7 +239,7 @@ export function evaluateExactMatch(
           matchesWordBoundary(rawFilename, synonym) ||
           containsPhrase(rawFilename, synonym)
         ) {
-          return {
+          candidates.push({
             subjectId: subject.id,
             subjectName: subject.name,
             score: 0.92,
@@ -232,10 +247,14 @@ export function evaluateExactMatch(
             evidence: [
               `Filename matches synonym "${synonym}" mapped to user subject "${subject.name}"`,
             ],
-          };
+          });
+          synonymMatched = true;
+          break;
         }
       }
+      if (synonymMatched) break;
     }
+    if (synonymMatched) continue;
 
     // 6. Core domain concept phrase matching from subject concepts (e.g. "circular queue", "openmp", "cuda", "deadlock")
     const concepts: string[] = [...(subject.representativeConcepts || [])];
@@ -258,7 +277,7 @@ export function evaluateExactMatch(
       if (normConcept.length < 3 || isPurelyGeneric(normConcept)) continue;
 
       if (containsPhrase(rawFilename, concept) || matchesWordBoundary(rawFilename, concept)) {
-        return {
+        candidates.push({
           subjectId: subject.id,
           subjectName: subject.name,
           score: 0.92,
@@ -266,10 +285,16 @@ export function evaluateExactMatch(
           evidence: [
             `Filename contains core subject concept "${concept}" for subject "${subject.name}"`,
           ],
-        };
+        });
+        break; // Only one concept match per subject
       }
     }
   }
 
-  return null;
+  if (candidates.length === 0) return null;
+
+  // Return the candidate with the highest score (stable: preserves first occurrence on tie)
+  return candidates.reduce((best, c) => (c.score > best.score ? c : best), candidates[0]);
 }
+
+

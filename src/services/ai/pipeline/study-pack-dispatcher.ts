@@ -62,8 +62,12 @@ export async function dispatchStudyPackGeneration(params: DispatchParams): Promi
     }
 
     if (!doc.subject_id) {
-      logger.error('[Dispatcher] Document lacks a subject_id.');
-      return { success: false, status: 'error', error: 'Document lacks a subject' };
+      logger.info(`[Dispatcher] Skipping study pack dispatch for document "${documentId}" — subject not yet assigned.`);
+      return {
+        success: true,
+        status: 'completed',
+        message: 'Skipping AI study pack — document has no subject assigned yet. Processing will start after subject confirmation.',
+      };
     }
 
     // Check if the document belongs to a Lectures folder

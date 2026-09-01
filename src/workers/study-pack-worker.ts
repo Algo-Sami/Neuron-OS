@@ -222,70 +222,102 @@ async function processStudyPackJob(job: Job<StudyPackJobPayload>): Promise<Study
     durationMs,
   };
 }
+// ─── BullMQ Worker Lifecycle ──────────────────────────────────────────────────
 
-// ─── BullMQ Worker ────────────────────────────────────────────────────────────
+let workerInstance: Worker<StudyPackJobPayload, StudyPackJobResult> | null = null;
+let watchdogTimer: NodeJS.Timeout | null = null;
+let isShuttingDown = false;
 
-const workerOptions: WorkerOptions = {
-  connection: createDedicatedRedisConnection(),
-  concurrency: CONCURRENCY,
-  // Generous BullMQ lock duration (10 minutes) matching our 12-minute DB lease
-  // Prevents BullMQ from marking active LLM sliding window summarization as stalled
-  stalledInterval: 120_000, // 2 minutes
-  lockDuration: 600_000,    // 10 minutes
-  // ── Redis Polling ─────────────────────────────────────────────────────────
-  // 500ms delay when queue is empty. Real Redis (Railway / Local) has no
-  // request limits, allowing ultra-fast job pickup and high throughput.
-  drainDelay: 500,
-};
+export function getWorkerInstance(): Worker<StudyPackJobPayload, StudyPackJobResult> | null {
+  return workerInstance;
+}
 
-const worker = new Worker<StudyPackJobPayload, StudyPackJobResult>(
-  QUEUE_NAME,
-  processStudyPackJob,
-  workerOptions
-);
+export function startStudyPackWorker(): Worker<StudyPackJobPayload, StudyPackJobResult> | null {
+  if (workerInstance) {
+    return workerInstance;
+  }
 
-// ─── Worker Event Handlers ────────────────────────────────────────────────────
+  // Ensure environment variables exist before starting
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-worker.on('ready', () => {
-  logEvent('worker_ready', undefined, undefined, {
-    concurrency: CONCURRENCY,
-    queue: QUEUE_NAME,
-  });
-});
+  if (!url || !serviceKey) {
+    logger.warn('[Worker] Supabase environment variables missing. Study Pack Worker not started.');
+    return null;
+  }
 
-worker.on('active', (job) => {
-  logEvent('job_active', job.id, job.data, { attempt: job.attemptsMade + 1 });
-});
+  try {
+    const workerOptions: WorkerOptions = {
+      connection: createDedicatedRedisConnection(),
+      concurrency: CONCURRENCY,
+      stalledInterval: 120_000, // 2 minutes
+      lockDuration: 600_000,    // 10 minutes
+      drainDelay: 500,
+    };
 
-worker.on('completed', (job, result: StudyPackJobResult) => {
-  logEvent('job_completed_event', job.id, job.data, {
-    durationMs: result.durationMs,
-  });
-});
+    workerInstance = new Worker<StudyPackJobPayload, StudyPackJobResult>(
+      QUEUE_NAME,
+      processStudyPackJob,
+      workerOptions
+    );
 
-worker.on('failed', (job, err) => {
-  const isNonRetryable = err instanceof NonRetryableError;
-  logEvent('job_failed_event', job?.id, job?.data, {
-    error: err.message,
-    isNonRetryable,
-    attempt: (job?.attemptsMade ?? 0) + 1,
-    willRetry: !isNonRetryable && (job?.attemptsMade ?? 0) < (job?.opts?.attempts ?? 3) - 1,
-  });
-});
+    workerInstance.on('ready', () => {
+      logEvent('worker_ready', undefined, undefined, {
+        concurrency: CONCURRENCY,
+        queue: QUEUE_NAME,
+      });
+    });
 
-worker.on('stalled', (jobId) => {
-  logEvent('job_stalled', jobId, undefined, {
-    note: 'Job stalled — will be recovered by BullMQ or DB watchdog',
-  });
-});
+    workerInstance.on('active', (job) => {
+      logEvent('job_active', job.id, job.data, { attempt: job.attemptsMade + 1 });
+    });
 
-worker.on('error', (err) => {
-  logger.error('[Worker] Worker-level error:', err);
-});
+    workerInstance.on('completed', (job, result: StudyPackJobResult) => {
+      logEvent('job_completed_event', job.id, job.data, {
+        durationMs: result.durationMs,
+      });
+    });
+
+    workerInstance.on('failed', (job, err) => {
+      const isNonRetryable = err instanceof NonRetryableError;
+      logEvent('job_failed_event', job?.id, job?.data, {
+        error: err.message,
+        isNonRetryable,
+        attempt: (job?.attemptsMade ?? 0) + 1,
+        willRetry: !isNonRetryable && (job?.attemptsMade ?? 0) < (job?.opts?.attempts ?? 3) - 1,
+      });
+    });
+
+    workerInstance.on('stalled', (jobId) => {
+      logEvent('job_stalled', jobId, undefined, {
+        note: 'Job stalled — will be recovered by BullMQ or DB watchdog',
+      });
+    });
+
+    workerInstance.on('error', (err) => {
+      logger.error('[Worker] Worker-level error:', err);
+    });
+
+    logEvent('worker_started', undefined, undefined, {
+      workerId: WORKER_INSTANCE_ID,
+      concurrency: CONCURRENCY,
+      queue: QUEUE_NAME,
+      nodeVersion: process.version,
+      pid: process.pid,
+    });
+
+    runStartupSweep().finally(() => {
+      startPeriodicWatchdog();
+    });
+
+    return workerInstance;
+  } catch (err: any) {
+    logger.error('[Worker] Failed to initialize study pack worker:', err);
+    return null;
+  }
+}
 
 // ─── Startup Sweep & Watchdog ──────────────────────────────────────────────────
-
-let watchdogTimer: NodeJS.Timeout | null = null;
 
 async function runStartupSweep() {
   try {
@@ -374,25 +406,9 @@ function startPeriodicWatchdog() {
   }
 }
 
-// ─── Startup Execution ────────────────────────────────────────────────────────
-
-logEvent('worker_started', undefined, undefined, {
-  workerId: WORKER_INSTANCE_ID,
-  concurrency: CONCURRENCY,
-  queue: QUEUE_NAME,
-  nodeVersion: process.version,
-  pid: process.pid,
-});
-
-runStartupSweep().finally(() => {
-  startPeriodicWatchdog();
-});
-
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
 
-let isShuttingDown = false;
-
-async function gracefulShutdown(signal: string) {
+export async function stopStudyPackWorker(signal: string = 'MANUAL') {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
@@ -403,12 +419,14 @@ async function gracefulShutdown(signal: string) {
     watchdogTimer = null;
   }
 
-  try {
-    // Stop accepting new jobs
-    await worker.close();
-    logEvent('worker_shutdown_complete', undefined, undefined, { signal });
-  } catch (err) {
-    logger.error('[Worker] Error during worker shutdown:', err);
+  if (workerInstance) {
+    try {
+      await workerInstance.close();
+      logEvent('worker_shutdown_complete', undefined, undefined, { signal });
+    } catch (err) {
+      logger.error('[Worker] Error during worker shutdown:', err);
+    }
+    workerInstance = null;
   }
 
   try {
@@ -418,20 +436,21 @@ async function gracefulShutdown(signal: string) {
   } catch (err) {
     logger.error('[Worker] Error closing connections:', err);
   }
-
-  process.exit(0);
 }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// Auto-start if executed directly via CLI
+const isDirectExecution = typeof require !== 'undefined' && require.main === module;
+if (isDirectExecution || process.argv[1]?.includes('study-pack-worker')) {
+  startStudyPackWorker();
 
-// Keep process alive (worker is event-driven)
-process.on('uncaughtException', (err) => {
-  logger.error('[Worker] Uncaught exception:', err);
-  gracefulShutdown('uncaughtException');
-});
-
-process.on('unhandledRejection', (reason) => {
-  logger.error('[Worker] Unhandled rejection:', reason);
-});
+  process.on('SIGTERM', () => stopStudyPackWorker('SIGTERM').then(() => process.exit(0)));
+  process.on('SIGINT', () => stopStudyPackWorker('SIGINT').then(() => process.exit(0)));
+  process.on('uncaughtException', (err) => {
+    logger.error('[Worker] Uncaught exception:', err);
+    stopStudyPackWorker('uncaughtException').then(() => process.exit(1));
+  });
+  process.on('unhandledRejection', (reason) => {
+    logger.error('[Worker] Unhandled rejection:', reason);
+  });
+}
 

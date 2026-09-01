@@ -10,7 +10,8 @@ import { chunkText } from '../chunker';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SummarySkillService } from './summary-skill-service';
-import { generateSummaryPDF } from '@/services/pdf/study-pack-pdf';
+import { KeyPointsSkillService } from './key-points-skill-service';
+import { generateSummaryPDF, generateKeyPointsPDF } from '@/services/pdf/study-pack-pdf';
 import { FolderSyncService } from './folder-sync-service';
 import { GeneratedPdfResult } from './pdf-generator-service';
 import { PipelineValidator } from './context-validator';
@@ -743,6 +744,51 @@ export class AIJobScheduler {
         updated_at: new Date().toISOString()
       }).eq('id', this.documentId);
 
+      // ── 8b. Key Points Generation ───────────────────────────────────────────
+      this.logDisk('keyPointsGen', `[StageResume] document=${this.documentId} resume_from=keyPointsGen`, 'INFO');
+      this.logDisk('keyPointsGen', 'Key Points Generation Started', 'INFO');
+      const keyPointsStartMs = Date.now();
+      let keyPointsResult: any = null;
+      try {
+        keyPointsResult = await KeyPointsSkillService.run({
+          documentId: this.documentId,
+          userId: this.userId,
+          forceRegenerate: !!this.options.forceRun,
+          supabase: this.supabase
+        });
+
+        if (keyPointsResult && keyPointsResult.success) {
+          const kpDurationMs = Date.now() - keyPointsStartMs;
+          if (keyPointsResult.cached) {
+            this.logDisk('keyPointsGen', `[Idempotency] stage=keyPointsGen existing=true action=reuse`, 'INFO');
+          }
+          this.logDisk('keyPointsGen', `Key Points Generated Successfully in ${kpDurationMs}ms`, 'INFO');
+
+          // Save structured key-points.json in Supabase Storage for storage parity
+          try {
+            const kpJsonBuffer = Buffer.from(JSON.stringify({
+              lectureTitle: keyPointsResult.lectureTitle || docTitle,
+              keyPoints: keyPointsResult.keyPoints || [],
+              importantFacts: keyPointsResult.importantFacts || [],
+              quickRevisionTips: keyPointsResult.quickRevisionTips || []
+            }, null, 2));
+
+            const kpJsonPath = `${this.userId}/ai-gen-${this.documentId}/key-points.json`;
+            await this.supabase.storage.from('documents').upload(kpJsonPath, kpJsonBuffer, {
+              contentType: 'application/json',
+              cacheControl: '3600',
+              upsert: true
+            });
+          } catch (kpStoreErr: any) {
+            this.logDisk('keyPointsGen', `Saving key-points.json to storage warning: ${kpStoreErr?.message}`, 'WARN');
+          }
+        } else {
+          this.logDisk('keyPointsGen', `Key Points Generation bypassed/failed: ${keyPointsResult?.errorMessage}`, 'WARN');
+        }
+      } catch (kpErr: any) {
+        this.logDisk('keyPointsGen', `Key Points Generation exception: ${kpErr?.message}`, 'WARN');
+      }
+
       // ── 9. PDF Rendering & Storage ─────────────────────────────────────────
       // NOTE: allowAfterLeaseLoss=true here — summaryGen already checkpointed so
       // even if the heartbeat misfired during the long AI call, we MUST complete
@@ -817,11 +863,45 @@ export class AIJobScheduler {
         .from('documents')
         .getPublicUrl(pdfStoragePath);
 
+      // Render & Upload Key Points PDF (if keyPoints generated successfully)
+      let keyPointsPdfBuffer: Buffer | null = null;
+      let kpPdfStoragePath: string | null = null;
+      let kpPublicUrl: string | null = null;
+
+      if (keyPointsResult && keyPointsResult.success) {
+        try {
+          this.logDisk('pdfRender', 'Key Points PDF Rendering Started', 'INFO');
+          keyPointsPdfBuffer = await generateKeyPointsPDF(keyPointsResult, docTitle, subjectName);
+          this.logDisk('pdfRender', 'Key Points PDF Generated', 'INFO');
+
+          kpPdfStoragePath = `${this.userId}/ai-gen-${ts}-${this.documentId.substring(0, 8)}-keypoints.pdf`;
+          const { error: kpUpErr } = await this.supabase.storage
+            .from('documents')
+            .upload(kpPdfStoragePath, keyPointsPdfBuffer, {
+              contentType: 'application/pdf',
+              cacheControl: '3600',
+              upsert: true
+            });
+
+          if (kpUpErr) {
+            this.logDisk('pdfRender', `Upload failed for KeyPoints PDF: ${kpUpErr.message}`, 'WARN');
+            keyPointsPdfBuffer = null;
+          } else {
+            const { data: { publicUrl: kpUrl } } = this.supabase.storage
+              .from('documents')
+              .getPublicUrl(kpPdfStoragePath);
+            kpPublicUrl = kpUrl;
+          }
+        } catch (kpPdfErr: any) {
+          this.logDisk('pdfRender', `Key Points PDF generation failed (non-fatal): ${kpPdfErr?.message}`, 'WARN');
+          keyPointsPdfBuffer = null;
+        }
+      }
+
       // ── Old PDF Cleanup (Version Storage Optimisation) ─────────────────────
-      // Now that the new PDF is safely uploaded, scan storage for any stale
-      // summary PDFs from previous AI_GENERATION_VERSION runs and delete them.
-      // Pattern: {userId}/ai-gen-*-{docId8}-summary.pdf
-      // We only delete AFTER the new file is confirmed in storage.
+      // Now that the new PDF(s) are safely uploaded, scan storage for any stale
+      // summary/keypoints PDFs from previous AI_GENERATION_VERSION runs and delete them.
+      // Pattern: {userId}/ai-gen-*-{docId8}-summary.pdf and {userId}/ai-gen-*-{docId8}-keypoints.pdf
       const docId8 = this.documentId.substring(0, 8);
 
       try {
@@ -831,20 +911,18 @@ export class AIJobScheduler {
           .list(this.userId, { limit: 500 });
 
         if (!listErr && storageFiles) {
-          // Match files that are summary PDFs for this specific document
+          // Match files that are summary or keypoints PDFs for this specific document
           const staleFiles = storageFiles
             .filter((f: any) => {
               const name: string = f.name || '';
-              return (
-                name.includes(`-${docId8}-summary.pdf`) &&
-                name.startsWith('ai-gen-') &&
-                `${this.userId}/${name}` !== pdfStoragePath  // exclude the new file
-              );
+              const isSummary = name.includes(`-${docId8}-summary.pdf`) && `${this.userId}/${name}` !== pdfStoragePath;
+              const isKeyPoints = name.includes(`-${docId8}-keypoints.pdf`) && (kpPdfStoragePath ? `${this.userId}/${name}` !== kpPdfStoragePath : true);
+              return name.startsWith('ai-gen-') && (isSummary || isKeyPoints);
             })
             .map((f: any) => `${this.userId}/${f.name}`);
 
           if (staleFiles.length > 0) {
-            this.logDisk('pdfRender', `Cleaning up ${staleFiles.length} stale summary PDF(s) from storage...`, 'INFO');
+            this.logDisk('pdfRender', `Cleaning up ${staleFiles.length} stale PDF(s) from storage...`, 'INFO');
             const { error: rmErr } = await this.supabase.storage
               .from('documents')
               .remove(staleFiles);
@@ -856,7 +934,7 @@ export class AIJobScheduler {
               this.logDisk('pdfRender', `Old PDF cleanup complete. Removed: ${staleFiles.join(', ')}`, 'INFO');
             }
           } else {
-            this.logDisk('pdfRender', 'No stale summary PDFs found — storage already clean.', 'INFO');
+            this.logDisk('pdfRender', 'No stale PDFs found — storage already clean.', 'INFO');
           }
         }
       } catch (cleanupErr: any) {
@@ -866,20 +944,34 @@ export class AIJobScheduler {
 
       // Save PDF via FolderSyncService
 
-      const pdfResult: GeneratedPdfResult = {
-        key: 'summary',
-        displayName: 'Summary',
-        suffixName: 'Summary',
-        storagePath: pdfStoragePath,
-        publicUrl,
-        size: pdfBuffer.length,
-        customFileName: 'Summary.pdf'
-      };
+      const pdfsToSync: GeneratedPdfResult[] = [
+        {
+          key: 'summary',
+          displayName: 'Summary',
+          suffixName: 'Summary',
+          storagePath: pdfStoragePath,
+          publicUrl,
+          size: pdfBuffer.length,
+          customFileName: 'Summary.pdf'
+        }
+      ];
+
+      if (keyPointsPdfBuffer && kpPdfStoragePath && kpPublicUrl) {
+        pdfsToSync.push({
+          key: 'keyPoints',
+          displayName: 'Key Points',
+          suffixName: 'Key-Points',
+          storagePath: kpPdfStoragePath,
+          publicUrl: kpPublicUrl,
+          size: keyPointsPdfBuffer.length,
+          customFileName: 'KeyPoints.pdf'
+        });
+      }
 
       try {
         const folderSyncService = new FolderSyncService(this.supabase);
-        await folderSyncService.run(this.userId, resolvedSubjectId, docTitle, [pdfResult], subjectName, this.documentId);
-        this.logDisk('pdfRender', 'PDF Stored', 'INFO');
+        await folderSyncService.run(this.userId, resolvedSubjectId, docTitle, pdfsToSync, subjectName, this.documentId);
+        this.logDisk('pdfRender', `PDFs Stored (${pdfsToSync.map(p => p.customFileName).join(', ')})`, 'INFO');
       } catch (err: any) {
         const errMsg = `Folder sync failed: ${err.message}`;
         this.logDisk('pdfRender', 'PDF Rendering Failed', 'ERROR');
