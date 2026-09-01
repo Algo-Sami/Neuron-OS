@@ -61,7 +61,14 @@ export async function ensureAchievementsExist() {
 export async function awardXP(
   userId: string, 
   actionType: 'upload_notes' | 'complete_quiz' | 'study_streak' | 'share_material' | 'daily_activity' | 'focus_session',
-  details?: { score?: number; totalQuestions?: number; levelReached?: number; count?: number }
+  details?: {
+    score?: number;
+    totalQuestions?: number;
+    levelReached?: number;
+    count?: number;
+    bonusXp?: number;
+    lastCheckInDate?: string;
+  }
 ) {
   // Invalidate cache when user performs an action
   activityStatsCache.delete(userId);
@@ -84,7 +91,7 @@ export async function awardXP(
   if (!progress) {
     const { data: newProgress, error: insertError } = await supabase
       .from('user_progress')
-      .insert({ user_id: userId, total_xp: 0, current_level: 1 })
+      .insert({ user_id: userId, total_xp: 0, monthly_xp: 0, current_level: 1 })
       .select()
       .single();
       
@@ -93,6 +100,20 @@ export async function awardXP(
       throw insertError;
     }
     progress = newProgress;
+  }
+
+  // Guard for daily check-in: prevent awarding if already checked in today
+  if (details?.lastCheckInDate && progress.last_check_in_date === details.lastCheckInDate) {
+    return {
+      success: false,
+      alreadyCheckedIn: true,
+      xpGained: 0,
+      newXp: progress.total_xp || 0,
+      newMonthlyXp: progress.monthly_xp || 0,
+      levelUp: false,
+      newLevel: progress.current_level || 1,
+      unlockedAchievements: []
+    };
   }
   
   // Set default points for actions
@@ -158,7 +179,8 @@ export async function awardXP(
     challengeAlert = `🎯 Completed Daily Challenge: Collaborator! (+${XP_CHALLENGE_SHARE} XP)`;
   }
 
-  const finalPointsAwarded = pointsAwarded + challengeBonusXP;
+  const bonusExtraXP = details?.bonusXp || 0;
+  const finalPointsAwarded = pointsAwarded + challengeBonusXP + bonusExtraXP;
   const newXp = oldXp + finalPointsAwarded;
   const newMonthlyXp = oldMonthlyXp + finalPointsAwarded;
 
@@ -192,23 +214,51 @@ export async function awardXP(
     targetXpForNext = getCumulativeXpForLevel(currentLevel + 1);
   }
   
-  // Update database progress
-  const { error: updateError } = await supabase
+  // Update database progress atomically
+  const updatePayload: Record<string, any> = {
+    total_xp: newXp,
+    monthly_xp: newMonthlyXp,
+    current_level: currentLevel,
+    current_streak: activeStreak,
+    highest_streak: highestStreak,
+    daily_challenges: dailyChallenges,
+    updated_at: new Date().toISOString()
+  };
+
+  let updateQuery = supabase
     .from('user_progress')
-    .update({
-      total_xp: newXp,
-      monthly_xp: newMonthlyXp,
-      current_level: currentLevel,
-      current_streak: activeStreak,
-      highest_streak: highestStreak,
-      daily_challenges: dailyChallenges,
-      updated_at: new Date().toISOString()
-    })
+    .update(updatePayload)
     .eq('user_id', userId);
+
+  if (details?.lastCheckInDate) {
+    updatePayload.last_check_in_date = details.lastCheckInDate;
+    // Guard against race conditions: only update if last_check_in_date is not already today
+    updateQuery = supabase
+      .from('user_progress')
+      .update(updatePayload)
+      .eq('user_id', userId)
+      .or(`last_check_in_date.neq.${details.lastCheckInDate},last_check_in_date.is.null`);
+  }
+
+  const { data: updatedRows, error: updateError } = await updateQuery.select('user_id');
     
   if (updateError) {
     console.error("Failed to update user progress:", updateError.message);
     throw updateError;
+  }
+
+  if (details?.lastCheckInDate && (!updatedRows || updatedRows.length === 0)) {
+    // Concurrent request already claimed check-in
+    return {
+      success: false,
+      alreadyCheckedIn: true,
+      xpGained: 0,
+      newXp: oldXp,
+      newMonthlyXp: oldMonthlyXp,
+      levelUp: false,
+      newLevel: currentLevel,
+      unlockedAchievements: []
+    };
   }
   
   // Insert log notification for points earned
@@ -246,6 +296,7 @@ export async function awardXP(
     success: true,
     xpGained: finalPointsAwarded,
     newXp,
+    newMonthlyXp,
     levelUp: hasLeveledUp,
     newLevel: currentLevel,
     unlockedAchievements: unlocked
@@ -289,10 +340,12 @@ async function checkAndTriggerAchievements(
     if (!unlockError) {
       unlockedAchievements.push(achievementName);
       // Award reward XP for the achievement!
-      const { data: prog } = await supabase.from('user_progress').select('total_xp').eq('user_id', userId).single();
+      const { data: prog } = await supabase.from('user_progress').select('total_xp, monthly_xp').eq('user_id', userId).single();
       const currentXp = prog?.total_xp || 0;
+      const currentMonthlyXp = prog?.monthly_xp || 0;
       await supabase.from('user_progress').update({
         total_xp: currentXp + ach.xp_reward,
+        monthly_xp: currentMonthlyXp + ach.xp_reward,
         updated_at: new Date().toISOString()
       }).eq('user_id', userId);
       

@@ -9,33 +9,14 @@ export async function dailyCheckIn() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // Fetch their current progress to verify last check-in date
-  const { data: progress, error: fetchError } = await supabase
-    .from("user_progress")
-    .select("last_check_in_date")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (fetchError) {
-    console.error("Error checking daily check-in date:", fetchError.message);
-  }
-
   const todayStr = new Date().toDateString();
-  if (progress && progress.last_check_in_date === todayStr) {
+
+  // Atomically verify, award XP, and record check-in in a single guarded transaction
+  const result = await awardXP(user.id, "daily_activity", { lastCheckInDate: todayStr });
+
+  if (!result.success || (result as any).alreadyCheckedIn) {
     return { success: false, message: "Already checked in today!" };
   }
-
-  // Award XP for daily activity check-in
-  const result = await awardXP(user.id, "daily_activity");
-
-  // Update check-in timestamp in database progress
-  await supabase
-    .from("user_progress")
-    .update({ 
-      last_check_in_date: todayStr,
-      updated_at: new Date().toISOString()
-    })
-    .eq("user_id", user.id);
 
   revalidatePath("/leaderboard");
   revalidatePath("/dashboard");

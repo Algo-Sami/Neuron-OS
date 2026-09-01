@@ -287,14 +287,9 @@ async function executeRoomSlashCommand(roomId: string, text: string, senderId: s
     const command = text.split(" ")[0]?.toLowerCase();
     const query = text.substring(command.length).trim();
 
-    // 1. Find a system profile/bot user or use host's profile as target
-    const { data: systemUser } = await supabase
-      .from("profiles")
-      .select("id")
-      .limit(1)
-      .single();
-
-    const botUserId = systemUser?.id || senderId;
+    // Attributing the requested AI command response to the invoking user (senderId)
+    // without querying arbitrary third-party user profiles from the database
+    const botUserId = senderId;
 
     if (command === "/explain") {
       if (!query) return;

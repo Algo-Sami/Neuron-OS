@@ -144,26 +144,38 @@ export async function mergeDuplicateFoldersAction(
 
   const [primary, ...dupes] = duplicates;
   const dupeIds = dupes.map((d) => d.id);
-  let filesPreserved = 0;
 
-  // Move all files from duplicates into the primary folder
-  for (const dupeId of dupeIds) {
-    const { data: moved, error: moveError } = await supabase
-      .from("documents")
-      .update({ folder_id: primary.id })
-      .eq("folder_id", dupeId)
-      .eq("user_id", user.id)
-      .is("deleted_at", null)
-      .select("id");
+  // 1. Move all documents from duplicate folders into the primary folder
+  const { data: movedDocs, error: moveDocsError } = await supabase
+    .from("documents")
+    .update({ folder_id: primary.id })
+    .in("folder_id", dupeIds)
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .select("id");
 
-    if (moveError) {
-      console.error(`[merge] Failed to move files from folder ${dupeId}:`, moveError.message);
-    } else {
-      filesPreserved += moved?.length || 0;
-    }
+  if (moveDocsError) {
+    console.error(`[merge] Failed to move documents from folders [${dupeIds.join(", ")}]:`, moveDocsError.message);
   }
 
-  // Delete the now-empty duplicate folders
+  const filesPreserved = movedDocs?.length || 0;
+
+  // 2. Move related upload audit records to the primary folder
+  const { error: moveUploadsError } = await supabase
+    .from("uploads")
+    .update({
+      folder_id: primary.id,
+      folder_name: primary.name,
+      ai_topic: primary.name,
+    })
+    .in("folder_id", dupeIds)
+    .eq("user_id", user.id);
+
+  if (moveUploadsError) {
+    console.error(`[merge] Failed to synchronize upload records from folders [${dupeIds.join(", ")}]:`, moveUploadsError.message);
+  }
+
+  // 3. Delete the now-empty duplicate folders after all dependent records are migrated
   const { error: deleteError } = await supabase
     .from("folders")
     .delete()

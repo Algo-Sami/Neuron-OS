@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { FileExplorer } from "@/components/file-explorer/file-explorer";
 import { getServerPreferences } from "@/lib/preferences-server";
 import { reconcileUserDocumentMetadata } from "@/services/storage/file-metadata";

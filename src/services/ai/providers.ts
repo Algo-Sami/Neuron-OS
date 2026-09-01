@@ -11,6 +11,8 @@ import { GeminiProvider } from './providers/gemini-provider';
 import { OpenRouterProvider } from './providers/openrouter-provider';
 import { classifyAIError } from './error-classifier';
 import { providerHealth } from './provider-health';
+import { executeWithAIRetry } from './errors/retry-policy';
+import { normalizeAIError } from './errors/ai-error-normalizer';
 import { logger } from '@/lib/logger';
 
 // Re-export type definitions for backwards-compatibility
@@ -47,13 +49,18 @@ export function detectProvider(modelName: string): 'gemini' | 'openrouter' {
 }
 
 /**
- * Main execution routing query. Resolves the correct provider, executes completion,
- * and handles robust fallback policies if the primary provider encounters issues.
+ * Main execution routing query. Resolves the correct provider, executes completion
+ * with centralized retry policy, and handles robust fallback policies if the primary
+ * provider encounters issues.
  */
 export async function executeAICompletion(
   primaryModel: string,
   prompt: string,
-  options?: GenerateOptions
+  options?: GenerateOptions & {
+    documentId?: string;
+    jobId?: string;
+    operation?: string;
+  }
 ): Promise<CompletionResult> {
   const primaryProviderId = detectProvider(primaryModel);
   const geminiFallbackModel = getStandardModelName('gemini');
@@ -101,13 +108,29 @@ export async function executeAICompletion(
         throw new Error('GEMINI_API_KEY is not defined in environment variables.');
       }
 
-      // Execute text generation
-      const result = await provider.generateText(attempt.model, prompt, options);
+      // Execute text generation wrapped with the single authoritative retry mechanism
+      const result = await executeWithAIRetry(
+        async () => {
+          return await provider.generateText(attempt.model, prompt, options);
+        },
+        {
+          documentId: options?.documentId,
+          jobId: options?.jobId,
+          operation: options?.operation || 'completion',
+          providerName: attempt.providerId,
+        }
+      );
+
       return result;
 
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
       const classified = classifyAIError(error, attempt.providerId);
+      const normalized = normalizeAIError(error, attempt.providerId);
+
+      // Attach normalized AI error metadata to lastError
+      (lastError as any).normalizedAIError = normalized;
+      (lastError as any).cooldownUntil = (error as any)?.cooldownUntil;
 
       if (i + 1 < attempts.length) {
         const nextAttempt = attempts[i + 1];
@@ -116,11 +139,15 @@ export async function executeAICompletion(
         );
       } else {
         logger.error(
-          `[AI Pipeline][Gateway] All configured provider attempts failed. Last error [${classified.category}]: ${lastError.message}`
+          `[AI Pipeline][Gateway] All configured provider attempts failed. Last error [${normalized.category}]: ${lastError.message}`
         );
       }
     }
   }
 
-  throw new Error(`AI generation completely failed across all active providers. Last error: ${lastError?.message || 'Unknown'}`);
+  const finalError = new Error(`AI generation completely failed across all active providers. Last error: ${lastError?.message || 'Unknown'}`);
+  (finalError as any).normalizedAIError = (lastError as any)?.normalizedAIError;
+  (finalError as any).cooldownUntil = (lastError as any)?.cooldownUntil;
+  throw finalError;
 }
+

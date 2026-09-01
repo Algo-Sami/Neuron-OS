@@ -7,6 +7,7 @@ import {
   Sparkles, Download, Copy, RefreshCw, Check, 
   BookOpen, Brain, ListCheck, HelpCircle, History, Calendar, List, Lightbulb
 } from "lucide-react";
+import { AIRateLimitCard } from "@/components/shared/ai-rate-limit-card";
 
 interface HistoryItem {
   id: string;
@@ -22,6 +23,9 @@ interface SummaryViewerProps {
     file_url: string;
     created_at: string;
     summary_status: string;
+    ai_cooldown_until?: string | null;
+    ai_error_category?: string | null;
+    ai_error_message?: string | null;
     subjects?: { name: string } | null;
   };
   initialHistory: HistoryItem[];
@@ -36,6 +40,22 @@ export default function SummaryViewer({ document, initialHistory }: SummaryViewe
   const [history, setHistory] = useState<HistoryItem[]>(initialHistory);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [rateLimitState, setRateLimitState] = useState<{
+    isRateLimited: boolean;
+    cooldownUntil?: string | null;
+    category?: string | null;
+    message?: string | null;
+  } | null>(() => {
+    if (document.ai_cooldown_until && new Date(document.ai_cooldown_until) > new Date()) {
+      return {
+        isRateLimited: true,
+        cooldownUntil: document.ai_cooldown_until,
+        category: document.ai_error_category,
+        message: document.ai_error_message
+      };
+    }
+    return null;
+  });
   const [isProcessing, setIsProcessing] = useState<boolean>(
     document.summary_status === "pending" || document.summary_status === "processing"
   );
@@ -62,11 +82,23 @@ export default function SummaryViewer({ document, initialHistory }: SummaryViewe
 
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 429 || data.code === 'AI_COOLDOWN_ACTIVE' || data.code === 'AI_RATE_LIMITED') {
+          setRateLimitState({
+            isRateLimited: true,
+            cooldownUntil: data.cooldownUntil || new Date(Date.now() + 60000).toISOString(),
+            category: data.category || 'rate_limit_temporary',
+            message: data.error
+          });
+          setIsProcessing(false);
+          setLoading(false);
+          return;
+        }
         throw new Error(data.error || "Failed to load summary");
       }
 
       setSummaryText(data.summary);
       setKeyPoints(data.keyPoints || []);
+      setRateLimitState(null); // Clear any previous rate limit state
       setIsProcessing(false); // Successfully generated, stop polling
       setLoading(false);
 
@@ -367,6 +399,16 @@ Powered by Neuron OS AI Summary Engine
                   <div className="h-3 w-full bg-muted rounded" />
                   <div className="h-3 w-5/6 bg-muted rounded" />
                 </div>
+              </div>
+            ) : rateLimitState?.isRateLimited ? (
+              <div className="py-6">
+                <AIRateLimitCard
+                  cooldownUntil={rateLimitState.cooldownUntil}
+                  errorCategory={rateLimitState.category}
+                  errorMessage={rateLimitState.message}
+                  onRetry={() => fetchSummary(activeMode, true)}
+                  isRetrying={loading}
+                />
               </div>
             ) : error ? (
               <div className="flex flex-col items-center justify-center text-center p-8 mt-12 gap-3 text-red-500">

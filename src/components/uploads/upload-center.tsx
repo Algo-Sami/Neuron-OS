@@ -25,7 +25,6 @@ import {
   ChevronRight,
   MoreHorizontal,
   ExternalLink,
-  Download,
   Trash2,
   BrainCircuit,
   ScrollText,
@@ -99,6 +98,9 @@ export interface DocumentRow {
   size?: number | null;
   uploads?: { file_size: number | null } | null;
   file_deleted?: boolean;
+  ai_cooldown_until?: string | null;
+  ai_error_category?: string | null;
+  ai_error_message?: string | null;
 }
 
 interface UploadCenterProps {
@@ -129,6 +131,14 @@ interface UploadQueueItem {
   destinationSubject?: string | null;
   destinationFolder?: string | null;
   abortController?: AbortController;
+  classification?: {
+    subjectId: string | null;
+    subjectName: string | null;
+    folderName: string | null;
+    confidence: number;
+    status: 'auto_applied' | 'needs_review';
+    method?: string;
+  };
   duplicateInfo?: {
     existingFile: {
       id: string;
@@ -145,7 +155,7 @@ interface UploadQueueItem {
 type SortKey = "date" | "name" | "type" | "subject";
 type SortDir = "asc" | "desc";
 type FormatFilterKey = "all" | "pdf" | "docx" | "pptx" | "txt" | "image";
-type StatusFilterKey = "all" | "completed" | "processing" | "needs_review" | "failed" | "deleted";
+type StatusFilterKey = "all" | "completed" | "processing" | "rate_limited" | "needs_review" | "failed" | "deleted";
 
 const ITEMS_PER_PAGE = 15;
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
@@ -199,13 +209,38 @@ function getStatusBadge(
   summaryStatus: string | null,
   quizStatus: string | null,
   classificationStatus?: string | null,
-  fileDeleted?: boolean
+  fileDeleted?: boolean,
+  aiCooldownUntil?: string | null,
+  aiErrorCategory?: string | null
 ) {
   if (fileDeleted) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-destructive/10 text-destructive border border-destructive/20 whitespace-nowrap">
         <span className="h-1.5 w-1.5 rounded-full bg-destructive shrink-0" />
         File Deleted
+      </span>
+    );
+  }
+
+  const isCooldownActive = aiCooldownUntil ? new Date(aiCooldownUntil) > new Date() : false;
+  const isRateLimited = summaryStatus === "rate_limited" || isCooldownActive;
+  const isRetrying = summaryStatus === "retrying";
+
+  if (isRateLimited) {
+    const isQuota = aiErrorCategory === "rate_limit_quota";
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 whitespace-nowrap">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+        {isQuota ? "Quota Restricted" : "AI Rate Limited"}
+      </span>
+    );
+  }
+
+  if (isRetrying) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+        AI Retrying
       </span>
     );
   }
@@ -1209,6 +1244,21 @@ function FileDetailPanel({
           </div>
         </div>
 
+        {/* AI Cooldown Notice */}
+        {doc.ai_cooldown_until && new Date(doc.ai_cooldown_until) > new Date() && (
+          <div className="flex items-start gap-2.5 px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <div className="h-6 w-6 rounded-md bg-amber-500/20 flex items-center justify-center shrink-0 mt-0.5">
+              <Clock className="h-3 w-3 text-amber-600 dark:text-amber-400 animate-pulse" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[9px] font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wider">AI Cooldown Active</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                {doc.ai_error_message || "AI requests temporarily throttled. Automatic recovery will enable soon."}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Date Deleted (only shown for deleted files) */}
         {doc.file_deleted && doc.deleted_at && (
           <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-destructive/10 border border-destructive/20 hover:bg-destructive/15 transition-colors">
@@ -1312,6 +1362,11 @@ function UploadHistorySection({
           d.classification_status === "needs_review" ||
           d.classification_status === "pending";
         if (!isNeedsReview) return false;
+      } else if (statusFilter === "rate_limited") {
+        const isRateLimited =
+          d.summary_status === "rate_limited" ||
+          (d.ai_cooldown_until ? new Date(d.ai_cooldown_until) > new Date() : false);
+        if (!isRateLimited) return false;
       } else if (statusFilter === "failed") {
         const isFailed =
           d.summary_status === "failed" || d.quiz_status === "failed";
@@ -1400,6 +1455,9 @@ function UploadHistorySection({
 
   const handleRegenerateSummary = async (doc: DocumentRow) => {
     if (!doc.file_url) return;
+    if (doc.ai_cooldown_until && new Date(doc.ai_cooldown_until) > new Date()) {
+      return;
+    }
     setGeneratingDocId(doc.id);
     try {
       await fetch("/api/generate-study-pack", {
@@ -1793,7 +1851,9 @@ function UploadHistorySection({
                             doc.summary_status,
                             doc.quiz_status,
                             doc.classification_status,
-                            doc.file_deleted
+                            doc.file_deleted,
+                            doc.ai_cooldown_until,
+                            doc.ai_error_category
                           )}
                         </td>
 
@@ -1884,13 +1944,18 @@ function UploadHistorySection({
                                             <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin text-primary" />
                                             Generating Summary…
                                           </DropdownMenuItem>
+                                        ) : (doc.ai_cooldown_until && new Date(doc.ai_cooldown_until) > new Date()) ? (
+                                          <DropdownMenuItem disabled className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                                            <Clock className="h-3.5 w-3.5 mr-2" />
+                                            AI Cooldown Active
+                                          </DropdownMenuItem>
                                         ) : (
                                           <DropdownMenuItem
                                             className="text-xs cursor-pointer"
                                             onClick={() => handleRegenerateSummary(doc)}
                                           >
                                             <RotateCw className="h-3.5 w-3.5 mr-2 text-amber-500" />
-                                            {doc.summary_status === "failed" ? "Regenerate Summary" : "Generate Summary"}
+                                            {doc.summary_status === "failed" || doc.summary_status === "rate_limited" ? "Retry Summary" : "Generate Summary"}
                                           </DropdownMenuItem>
                                         )}
 

@@ -61,13 +61,24 @@ export async function saveStudyPlanAction(
       return { success: false, error: upsertError.message };
     }
 
-    // Sync tasks as Global Reminders across Neuron OS
+    // Fetch user subjects once in bulk for fast name-to-id mapping
+    const { data: userSubjects } = await supabase
+      .from("subjects")
+      .select("id, name")
+      .eq("user_id", userId)
+      .is("deleted_at", null);
+
+    const subjectMap = new Map<string, string>();
+    (userSubjects || []).forEach((s) => subjectMap.set(s.name.toLowerCase().trim(), s.id));
+
+    // Prepare new reminders from the generated schedule
     const daysMap: Record<string, number> = {
       sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6
     };
     
     const now = new Date();
     const currentDayOfWeek = now.getDay(); // 0 is Sunday
+    const remindersToInsert: any[] = [];
 
     for (const dailyPlan of planData.weeklySchedule.dailyPlans) {
       const targetDayIndex = daysMap[dailyPlan.day.toLowerCase()];
@@ -87,34 +98,35 @@ export async function saveStudyPlanAction(
         const timePart = task.time.split("-")[0]?.trim();
         let hour = 9, minute = 0;
         if (timePart) {
-          const match = timePart.match(/(\d+):(\d+)\s*(AM|PM)/i);
-          if (match) {
-            hour = parseInt(match[1]);
-            const minutes = parseInt(match[2]);
-            const isPM = match[3].toUpperCase() === "PM";
+          const match12 = timePart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+          const match24 = timePart.match(/^(\d{1,2}):(\d{2})/);
+          if (match12) {
+            hour = parseInt(match12[1]);
+            const minutes = parseInt(match12[2]);
+            const isPM = match12[3].toUpperCase() === "PM";
             if (isPM && hour < 12) hour += 12;
             if (!isPM && hour === 12) hour = 0;
             minute = minutes;
+          } else if (match24) {
+            hour = parseInt(match24[1]);
+            minute = parseInt(match24[2]);
           }
         }
 
         const reminderDate = new Date(targetDate);
         reminderDate.setHours(hour, minute, 0, 0);
 
-        // Fetch subject ID if it exists
-        let subjectId = null;
-        if (task.subject && task.subject !== "General Study") {
-          const { data: subj } = await supabase
-            .from("subjects")
-            .select("id")
-            .eq("user_id", userId)
-            .ilike("name", task.subject)
-            .maybeSingle();
-          if (subj) subjectId = subj.id;
+        // Prevent generating past-timestamp reminders for today's elapsed slots
+        if (diffDays === 0 && reminderDate.getTime() <= now.getTime()) {
+          reminderDate.setDate(reminderDate.getDate() + 7);
         }
 
-        // Insert into reminders
-        await supabase.from("reminders").insert({
+        // Map subject ID from cached map
+        const subjectId = (task.subject && task.subject !== "General Study")
+          ? subjectMap.get(task.subject.toLowerCase().trim()) || null
+          : null;
+
+        remindersToInsert.push({
           user_id: userId,
           subject_id: subjectId,
           title: `[Study Coach] ${task.subject}: ${task.activity}`,
@@ -124,6 +136,26 @@ export async function saveStudyPlanAction(
           extracted_from_ai: true,
           completed_status: false,
         });
+      }
+    }
+
+    // Synchronize reminders: purge only previous Study Coach reminders for this user
+    try {
+      await supabase
+        .from("reminders")
+        .delete()
+        .eq("user_id", userId)
+        .eq("extracted_from_ai", true)
+        .ilike("title", "[Study Coach]%");
+    } catch (delErr: any) {
+      logger.warn("[saveStudyPlanAction] Non-fatal warning clearing old reminders:", delErr?.message);
+    }
+
+    // Bulk insert new validated reminders
+    if (remindersToInsert.length > 0) {
+      const { error: insertErr } = await supabase.from("reminders").insert(remindersToInsert);
+      if (insertErr) {
+        logger.warn("[saveStudyPlanAction] Warning inserting study coach reminders:", insertErr.message);
       }
     }
 

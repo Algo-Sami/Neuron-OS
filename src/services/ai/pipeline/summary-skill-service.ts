@@ -18,6 +18,9 @@ import { PipelineValidator } from './context-validator';
 import { SlidingWindowSummarizer } from './sliding-window-summarizer';
 import { CURRENT_PROMPT_VERSION } from './ai-version-manifest';
 
+import { normalizeAIError } from '../errors/ai-error-normalizer';
+import { NormalizedAIError, AIErrorCategory } from '../errors/ai-error-types';
+
 export type SummaryMode =
   | 'beginner'
   | 'concise'
@@ -41,6 +44,9 @@ export interface SummarySkillOutput {
   createdAt?: string;
   cached?: boolean;
   errorMessage?: string;
+  errorCategory?: AIErrorCategory;
+  cooldownUntil?: string;
+  normalizedError?: NormalizedAIError;
   retrievalChunks?: number;
   confidenceScore?: number;
   confidenceLabel?: string;
@@ -246,12 +252,25 @@ export class SummarySkillService {
       };
 
     } catch (err: any) {
+      const normalized = (err as any)?.normalizedAIError || normalizeAIError(err, 'gemini');
       const msg = err?.message || String(err);
-      logger.error(`[SummarySkill] Pipeline failed: ${msg}`);
+      logger.error(`[SummarySkill] Pipeline failed [${normalized.category}]: ${msg}`);
       if (jobId) {
         await AssetGenerationManager.recordGenerationFailure(supabase, jobId, msg, 'generating');
       }
-      return { success: false, errorMessage: msg };
+
+      const cooldownUntil = (err as any)?.cooldownUntil ||
+        (normalized.category.startsWith('rate_limit')
+          ? new Date(Date.now() + (normalized.suggestedCooldownMs || 60000)).toISOString()
+          : undefined);
+
+      return {
+        success: false,
+        errorMessage: normalized.userMessage || msg,
+        errorCategory: normalized.category,
+        cooldownUntil,
+        normalizedError: normalized
+      };
     }
   }
 

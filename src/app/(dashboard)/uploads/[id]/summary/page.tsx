@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import SummaryViewer from "./summary-viewer";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";

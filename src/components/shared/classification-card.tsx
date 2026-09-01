@@ -97,30 +97,28 @@ function ReviewDialog({
   );
   const [customFolder, setCustomFolder] = useState<string>("");
 
-  const prevDocIdRef = React.useRef<string | null>(doc?.id || null);
+  const [prevDocId, setPrevDocId] = useState<string | null>(doc?.id || null);
 
-  React.useEffect(() => {
-    // Only reset form state if the user opened a DIFFERENT document
-    if (doc && doc.id !== prevDocIdRef.current) {
-      prevDocIdRef.current = doc.id;
-      const match = subjects.find(
-        (s) =>
-          s.name.toLowerCase() === (doc.ai_subject || "").toLowerCase() ||
-          (doc.ai_subject &&
-            s.name.toLowerCase().startsWith(doc.ai_subject.toLowerCase()))
-      );
-      if (subjects.length === 0) {
-        setIsCreatingNew(true);
-        setNewSubjectName(doc.ai_subject && doc.ai_subject !== "General Study" ? doc.ai_subject : "");
-      } else {
-        setIsCreatingNew(!match && !subjects[0]);
-        setSelectedSubjectId(match?.id || (subjects[0]?.id ?? ""));
-        setNewSubjectName(doc.ai_subject && doc.ai_subject !== "General Study" ? doc.ai_subject : "");
-      }
-      setSelectedFolder(doc.ai_topic || "Lectures");
-      setCustomFolder("");
+  // Adjust state during render when a different document is selected
+  if (doc && doc.id !== prevDocId) {
+    setPrevDocId(doc.id);
+    const match = subjects.find(
+      (s) =>
+        s.name.toLowerCase() === (doc.ai_subject || "").toLowerCase() ||
+        (doc.ai_subject &&
+          s.name.toLowerCase().startsWith(doc.ai_subject.toLowerCase()))
+    );
+    if (subjects.length === 0) {
+      setIsCreatingNew(true);
+      setNewSubjectName(doc.ai_subject && doc.ai_subject !== "General Study" ? doc.ai_subject : "");
+    } else {
+      setIsCreatingNew(!match && !subjects[0]);
+      setSelectedSubjectId(match?.id || (subjects[0]?.id ?? ""));
+      setNewSubjectName(doc.ai_subject && doc.ai_subject !== "General Study" ? doc.ai_subject : "");
     }
-  }, [doc, subjects]);
+    setSelectedFolder(doc.ai_topic || "Lectures");
+    setCustomFolder("");
+  }
 
   const selectedSubject = subjects.find((s) => s.id === selectedSubjectId);
   const effectiveFolder = customFolder.trim() || selectedFolder || "Lectures";

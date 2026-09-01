@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
     const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('id, title, summary_status')
+      .select('id, title, summary_status, ai_cooldown_until')
       .eq('id', documentId)
       .eq('user_id', user.id)
       .is('deleted_at', null)
@@ -68,7 +68,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Document not found or access denied' }, { status: 404 });
     }
 
-    if (document.summary_status === 'failed') {
+    // Server-Side Cooldown Guard
+    if (document.ai_cooldown_until && new Date(document.ai_cooldown_until) > new Date()) {
+      logger.warn(`[Summarize] Rejecting request for doc ${documentId} — cooldown active until ${document.ai_cooldown_until}`);
+      return NextResponse.json(
+        {
+          error: `AI rate limit cooldown is active. Please wait a moment before trying again.`,
+          code: 'AI_COOLDOWN_ACTIVE',
+          cooldownUntil: document.ai_cooldown_until,
+        },
+        { status: 429 }
+      );
+    }
+
+    if (document.summary_status === 'failed' && !forceRegenerate) {
       return NextResponse.json(
         { error: 'Document analysis failed. Please delete and re-upload this file.' },
         { status: 422 }
@@ -89,9 +102,15 @@ export async function POST(request: NextRequest) {
 
     if (!result.success) {
       logger.error(`[Summarize] SummarySkillService failed: ${result.errorMessage}`);
+      const isRateLimited = result.errorCategory?.startsWith('rate_limit') || !!result.cooldownUntil;
       return NextResponse.json(
-        { error: result.errorMessage || 'Summary generation failed. Please try again.' },
-        { status: 502 }
+        {
+          error: result.errorMessage || 'Summary generation failed. Please try again.',
+          code: isRateLimited ? 'AI_RATE_LIMITED' : 'GENERATION_FAILED',
+          category: result.errorCategory,
+          cooldownUntil: result.cooldownUntil
+        },
+        { status: isRateLimited ? 429 : 502 }
       );
     }
 

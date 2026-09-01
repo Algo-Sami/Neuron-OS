@@ -3,7 +3,7 @@
 import React, { useRef, useCallback, memo, useState } from "react";
 import { FileIcon } from "./explorer-icons";
 import { ExplorerItemData, ViewMode, SortProperty } from "@/types/explorer";
-import { Calendar, ChevronUp, ChevronDown, Star, FolderOpen, AlertTriangle, CheckCircle2, Loader2, Clock } from "lucide-react";
+import { Calendar, ChevronUp, ChevronDown, Star, FolderOpen, AlertTriangle, Loader2, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Folder Status Badge ───────────────────────────────────────────────────────────────────

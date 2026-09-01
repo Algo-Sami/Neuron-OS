@@ -4,7 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { processDocument } from '@/services/ai/processor';
 import { chunkText } from '@/services/ai/chunker';
-import { extractDeadlinesFromText, classifyAcademicDocument } from '@/services/ai/gemini';
+import { extractDeadlinesFromText } from '@/services/ai/gemini';
+import { SubjectClassifier } from '@/services/classification/classifier';
 import { logger } from '@/lib/logger';
 import { getEmbedding, getEmbeddings } from '@/services/ai/embeddings';
 import { routeAIRequest } from '@/services/ai/router';
@@ -362,114 +363,147 @@ async function backgroundExtractionTask(
       logToDisk(`[${documentId}] Document summary_status marked completed and embedding saved successfully.`);
     }
 
-    // Fetch existing subjects to help the AI map to existing folders
-    const { data: currentSubjects } = await supabase
-      .from('subjects')
-      .select('name')
-      .eq('user_id', userId)
-      .is('deleted_at', null);
-    const existingSubjectNames = currentSubjects?.map(s => String(s.name)) || [];
-
-    logToDisk(`[${documentId}] Running parallel AI jobs: Gemini academic classification & deadline extraction...`);
+    logToDisk(`[${documentId}] Running parallel AI jobs: SubjectClassifier & deadline extraction...`);
 
     const [classification, deadlines] = await Promise.all([
-      classifyAcademicDocument(fileName, extractedText.substring(0, 10000), fileType, existingSubjectNames),
+      SubjectClassifier.classify(
+        {
+          userId,
+          filename: fileName,
+          extractedText: extractedText.substring(0, 10000),
+          mimeType: fileType
+        },
+        { supabase }
+      ),
       extractDeadlinesFromText(extractedText.substring(0, 15000))
     ]);
 
-    logToDisk(`[${documentId}] Parallel AI jobs completed. classification confidence=${classification.confidence}, deadlines count=${deadlines.length}`);
+    logToDisk(`[${documentId}] Parallel AI jobs completed. classification confidence=${classification.confidence}, method=${classification.method}, deadlines count=${deadlines.length}`);
 
-    // A. Handle Classification Results
+    // A. Handle Classification Results using Centralized SubjectClassifier
     let resolvedSubjectId: string | null = null;
     try {
       const confidence = classification.confidence;
-      const suggestedSubject = classification.subject;
-      const suggestedTopic = classification.topic;
-      const suggestedDocType = classification.docType;
-      const suggestedTags = classification.tags;
+      const suggestedSubject = classification.subjectName || 'General Study';
+      const isHighConfidence = confidence >= 0.90;
+      const classificationStatus: 'auto_applied' | 'needs_review' = isHighConfidence ? 'auto_applied' : 'needs_review';
 
-      logger.info(`[${documentId}] Classified as Subject: ${suggestedSubject}, Topic: ${suggestedTopic}, Confidence: ${confidence}`);
+      const targetFolderName = classification.folderName || 'Lectures';
+      let resolvedFolderId: string | null = null;
+
+      if (isHighConfidence && classification.subjectId) {
+        resolvedSubjectId = classification.subjectId;
+
+        // Resolve standard folder (with parent-child nesting for Lab materials)
+        if (targetFolderName === 'Lab' && classification.labSubfolderName) {
+          let labParentId: string | null = null;
+
+          // Check if root-level "Lab" folder exists
+          const { data: existingLabParent } = await supabase
+            .from('folders')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('subject_id', resolvedSubjectId)
+            .ilike('name', 'Lab')
+            .is('parent_folder_id', null)
+            .maybeSingle();
+
+          if (existingLabParent) {
+            labParentId = existingLabParent.id;
+          } else {
+            const { data: newLabParent, error: parentError } = await supabase
+              .from('folders')
+              .insert({
+                user_id: userId,
+                subject_id: resolvedSubjectId,
+                parent_folder_id: null,
+                name: 'Lab'
+              })
+              .select('id')
+              .single();
+
+            if (!parentError && newLabParent) {
+              labParentId = newLabParent.id;
+              logToDisk(`[${documentId}] Created parent "Lab" folder (id=${labParentId})`);
+            }
+          }
+
+          if (labParentId) {
+            const { data: existingChild } = await supabase
+              .from('folders')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('subject_id', resolvedSubjectId)
+              .eq('parent_folder_id', labParentId)
+              .ilike('name', classification.labSubfolderName)
+              .maybeSingle();
+
+            if (existingChild) {
+              resolvedFolderId = existingChild.id;
+            } else {
+              const { data: newChild, error: childError } = await supabase
+                .from('folders')
+                .insert({
+                  user_id: userId,
+                  subject_id: resolvedSubjectId,
+                  parent_folder_id: labParentId,
+                  name: classification.labSubfolderName
+                })
+                .select('id')
+                .single();
+
+              if (!childError && newChild) {
+                resolvedFolderId = newChild.id;
+                logToDisk(`[${documentId}] Created nested Lab subfolder "${classification.labSubfolderName}" (id=${resolvedFolderId})`);
+              }
+            }
+          }
+        } else {
+          // Standard single-level folder (Lectures, Assignments, Quizzes, Projects, Presentations)
+          const { data: existingFolder } = await supabase
+            .from('folders')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('subject_id', resolvedSubjectId)
+            .ilike('name', targetFolderName)
+            .is('parent_folder_id', null)
+            .maybeSingle();
+
+          if (existingFolder) {
+            resolvedFolderId = existingFolder.id;
+          } else {
+            const { data: newFolder, error: folderError } = await supabase
+              .from('folders')
+              .insert({
+                user_id: userId,
+                subject_id: resolvedSubjectId,
+                parent_folder_id: null,
+                name: targetFolderName
+              })
+              .select('id')
+              .single();
+
+            if (!folderError && newFolder) {
+              resolvedFolderId = newFolder.id;
+              logToDisk(`[${documentId}] Created standard folder "${targetFolderName}" (id=${resolvedFolderId})`);
+            }
+          }
+        }
+      }
 
       const updateData: Record<string, unknown> = {
         ai_subject: suggestedSubject,
-        ai_topic: suggestedTopic,
-        ai_doc_type: suggestedDocType,
+        ai_topic: targetFolderName,
+        ai_doc_type: targetFolderName.toLowerCase(),
         classification_confidence: confidence,
-        tags: suggestedTags,
+        classification_status: classificationStatus,
+        subject_id: isHighConfidence ? resolvedSubjectId : null,
+        folder_id: isHighConfidence ? resolvedFolderId : null,
+        tags: [],
         updated_at: new Date().toISOString()
       };
 
-      let subjectId = null;
-      if (confidence >= 0.80) {
-        updateData.classification_status = 'auto_applied';
-
-        const { data: existingSubject } = await supabase
-          .from('subjects')
-          .select('id')
-          .eq('user_id', userId)
-          .is('deleted_at', null)
-          .ilike('name', suggestedSubject)
-          .maybeSingle();
-
-        if (existingSubject) {
-          subjectId = existingSubject.id;
-          resolvedSubjectId = subjectId;
-          logToDisk(`[${documentId}] Mapped to existing subject: ${suggestedSubject} (id=${subjectId})`);
-        } else {
-          logToDisk(`[${documentId}] Subject "${suggestedSubject}" not found. Creating new Subject in DB.`);
-          const { data: newSubject, error: subjectError } = await supabase
-            .from('subjects')
-            .insert({
-              user_id: userId,
-              name: suggestedSubject,
-              color: '#F4C542'
-            })
-            .select('id')
-            .single();
-
-          if (subjectError) throw subjectError;
-          subjectId = newSubject.id;
-          resolvedSubjectId = subjectId;
-          logToDisk(`[${documentId}] Created subject with id: ${subjectId}`);
-        }
-
-        let folderId = null;
-        const { data: existingFolder } = await supabase
-          .from('folders')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('subject_id', subjectId)
-          .ilike('name', suggestedTopic)
-          .maybeSingle();
-
-        if (existingFolder) {
-          folderId = existingFolder.id;
-          logToDisk(`[${documentId}] Mapped to existing folder: ${suggestedTopic} (id=${folderId})`);
-        } else {
-          logToDisk(`[${documentId}] Folder "${suggestedTopic}" not found. Creating new Folder in DB.`);
-          const { data: newFolder, error: folderError } = await supabase
-            .from('folders')
-            .insert({
-              user_id: userId,
-              subject_id: subjectId,
-              name: suggestedTopic
-            })
-            .select('id')
-            .single();
-
-          if (folderError) throw folderError;
-          folderId = newFolder.id;
-          logToDisk(`[${documentId}] Created folder with id: ${folderId}`);
-        }
-
-        updateData.subject_id = subjectId;
-        updateData.folder_id = folderId;
-      } else {
-        updateData.classification_status = 'pending';
-        logToDisk(`[${documentId}] Low confidence (${confidence}). Kept as pending for user review.`);
-      }
-
-      logToDisk(`[${documentId}] Applying classification subject/folder updates to document...`);
+      logToDisk(`[${documentId}] Applying centralized classification results (status=${classificationStatus}, confidence=${confidence})...`);
       const { error: classificationError } = await supabase
         .from('documents')
         .update(updateData)
@@ -483,8 +517,8 @@ async function backgroundExtractionTask(
         try {
           revalidatePath('/subjects');
           revalidatePath('/uploads');
-          if (subjectId) {
-            revalidatePath(`/subjects/${subjectId}`);
+          if (resolvedSubjectId) {
+            revalidatePath(`/subjects/${resolvedSubjectId}`);
           }
         } catch (e) {
           logger.error('Failed to revalidate paths:', e);
@@ -500,7 +534,7 @@ async function backgroundExtractionTask(
 
       if (finalDeadlines.length === 0) {
         const lowerName = fileName.toLowerCase();
-        const docTypeLower = (classification?.docType || '').toLowerCase();
+        const docTypeLower = (classification?.folderName || '').toLowerCase();
         
         let inferredType: 'assignment' | 'exam' | 'quiz' | 'presentation' | 'generic' | null = null;
         let inferredTitle = '';
@@ -541,7 +575,7 @@ async function backgroundExtractionTask(
             dueDate: inferredDueDate.toISOString(),
             type: inferredType,
             priority: daysAhead <= 3 ? 'high' : 'medium',
-            course: classification?.subject || 'General Study'
+            course: classification?.subjectName || 'General Study'
           });
         }
       }

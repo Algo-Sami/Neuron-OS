@@ -506,29 +506,34 @@ export async function duplicateDocumentAction(documentId: string) {
     throw new Error(fetchError?.message || "Failed to find document to duplicate");
   }
 
-  // Prepare duplicate data, omit id, created_at, updated_at
-  const rest = { ...sourceDoc } as Record<string, unknown>;
-  delete rest.id;
-  delete rest.created_at;
-  delete rest.updated_at;
-  delete rest.title;
-  const title = sourceDoc.title;
+  // Explicitly remove identity and lifecycle fields so duplicate gets a fresh identity
+  const {
+    id: _origId,
+    upload_id: _origUploadId,
+    created_at: _origCreatedAt,
+    updated_at: _origUpdatedAt,
+    deleted_at: _origDeletedAt,
+    title: origTitle,
+    ...cloneableFields
+  } = sourceDoc;
 
   // Append copy suffix to title
-  const newTitle = title.includes(" - Copy")
-    ? title.replace(/ - Copy( \(\d+\))?$/, (match: string, p1?: string) => {
+  const newTitle = origTitle.includes(" - Copy")
+    ? origTitle.replace(/ - Copy( \(\d+\))?$/, (match: string, p1?: string) => {
         if (!p1) return " - Copy (2)";
         const num = parseInt(p1.trim().replace(/[()]/g, "")) + 1;
         return ` - Copy (${num})`;
       })
-    : `${title} - Copy`;
+    : `${origTitle} - Copy`;
 
   const { error: insertError } = await supabase
     .from("documents")
     .insert({
-      ...rest,
+      ...cloneableFields,
       title: newTitle,
-      user_id: user.id
+      upload_id: null,
+      user_id: user.id,
+      deleted_at: null,
     });
 
   if (insertError) throw new Error(insertError.message || "Failed to duplicate file");
@@ -587,7 +592,7 @@ export async function duplicateFolderAction(folderId: string) {
 
     const newFolderId = newFolder.id;
 
-    // Duplicate files in this folder
+    // Duplicate files in this folder with clean identity (upload_id = null)
     const { data: docs } = await supabase
       .from("documents")
       .select("*")
@@ -597,15 +602,21 @@ export async function duplicateFolderAction(folderId: string) {
 
     if (docs && docs.length > 0) {
       const clonedDocs = docs.map(doc => {
-        const rest = { ...doc } as Record<string, unknown>;
-        delete rest.id;
-        delete rest.created_at;
-        delete rest.updated_at;
-        delete rest.folder_id;
+        const {
+          id: _docId,
+          upload_id: _uploadId,
+          created_at: _createdAt,
+          updated_at: _updatedAt,
+          deleted_at: _deletedAt,
+          folder_id: _folderId,
+          ...cloneableFields
+        } = doc;
         return {
-          ...rest,
+          ...cloneableFields,
+          upload_id: null,
           folder_id: newFolderId,
-          user_id: userId
+          user_id: userId,
+          deleted_at: null,
         };
       });
       const { error: insDocsError } = await supabase.from("documents").insert(clonedDocs);
@@ -633,3 +644,4 @@ export async function duplicateFolderAction(folderId: string) {
   revalidatePath("/subjects");
   return { success: true };
 }
+

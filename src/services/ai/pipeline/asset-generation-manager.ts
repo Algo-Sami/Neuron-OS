@@ -426,7 +426,17 @@ export class AssetGenerationManager {
         );
 
         if (existingAsset) {
-          await KnowledgeAssetRegistry.markFailed(supabase, existingAsset.id, errorMessage, errorStage);
+          // If asset already had valid ready content before regeneration, preserve it
+          if (existingAsset.content && (typeof existingAsset.content === 'object' && Object.keys(existingAsset.content).length > 0)) {
+            AssetGenerationManager.logToDisk(`[AssetManager] Preserving existing valid asset content for [${existingAsset.id}] despite failed regeneration.`);
+            await KnowledgeAssetRegistry.updateStatus(supabase, existingAsset.id, {
+              status: 'ready',
+              errorMessage: `Regeneration interrupted: ${errorMessage}`,
+              errorStage
+            });
+          } else {
+            await KnowledgeAssetRegistry.markFailed(supabase, existingAsset.id, errorMessage, errorStage);
+          }
         }
 
         // Cascade failure to any queued dependent jobs for this document

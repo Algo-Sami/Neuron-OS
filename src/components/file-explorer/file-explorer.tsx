@@ -331,7 +331,6 @@ export function FileExplorer({
     // Run asynchronously in the next frame to avoid synchronous state-updates in effect warning
     const handle = requestAnimationFrame(loadFromLocalStorage);
     return () => cancelAnimationFrame(handle);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [favoritesKey, recentKey]);
   const [showQuickAccess, setShowQuickAccess] = useState(
     initialPreferences?.showQuickAccess !== undefined ? initialPreferences.showQuickAccess : true
@@ -1224,7 +1223,7 @@ export function FileExplorer({
     } finally {
       setIsLoading(false);
     }
-  }, [selectedIds, rawItems, activeTab, router, initialFolders]);
+  }, [selectedIds, rawItems, activeTab, router, initialFolders, favoritesKey, recentKey]);
 
   // Restore handler for Recycle Bin
   const handleRestoreSelected = useCallback(async () => {

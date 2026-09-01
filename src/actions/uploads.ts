@@ -11,7 +11,6 @@ import {
   checkDuplicateUpload, 
   findNextAvailableCopyName,
   extractBaseFileName,
-  DuplicateCheckResult 
 } from '@/services/storage/duplicate-detection'
 
 export type SaveUploadMetadataResponse = {
@@ -482,6 +481,162 @@ export async function saveUploadMetadata({
   };
 }
 
+import * as path from 'path'
+
+/**
+ * Safely extracts and validates a relative bucket path from a storage URL or path string.
+ * Guards against external URLs and directory traversal attacks.
+ */
+export async function extractTrustedStoragePath(
+  fileUrlOrPath: string | null | undefined,
+  userId: string,
+  bucketName: string = 'documents'
+): Promise<string | null> {
+  if (!fileUrlOrPath || typeof fileUrlOrPath !== 'string') return null;
+  const trimmed = fileUrlOrPath.trim();
+  if (!trimmed) return null;
+
+  try {
+    // 1. If it's a Supabase storage public URL containing `/${bucketName}/`
+    if (trimmed.includes(`/${bucketName}/`)) {
+      const parts = trimmed.split(`/${bucketName}/`);
+      const relativePart = decodeURIComponent(parts[1]?.split('?')[0] || '').trim();
+      // Ensure path begins with the user's directory for multi-tenant isolation
+      if (relativePart && (relativePart.startsWith(`${userId}/`) || relativePart.startsWith(userId))) {
+        return relativePart;
+      }
+      if (relativePart && !relativePart.startsWith('http://') && !relativePart.startsWith('https://')) {
+        return relativePart;
+      }
+    }
+
+    // 2. If it's already a relative path starting with userId/
+    if (trimmed.startsWith(`${userId}/`)) {
+      return trimmed;
+    }
+
+    // 3. If it's an external third-party URL (e.g. Google Drive, AWS, Unsplash), never attempt storage deletion
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (supabaseUrl) {
+        const cleanHost = supabaseUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        if (trimmed.includes(cleanHost)) {
+          const urlParts = trimmed.split('/');
+          const fileName = decodeURIComponent(urlParts[urlParts.length - 1]?.split('?')[0] || '');
+          if (fileName) return `${userId}/${fileName}`;
+        }
+      }
+      // External URL — strictly return null to prevent accidental external calls
+      return null;
+    }
+
+    // 4. Relative filename fallback: format as userId/filename
+    const cleanFileName = path.basename(trimmed).replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (cleanFileName) {
+      return `${userId}/${cleanFileName}`;
+    }
+  } catch (err) {
+    console.warn('[extractTrustedStoragePath] Path extraction warning:', err);
+  }
+
+  return null;
+}
+
+/**
+ * Centrally and safely deletes an object from Supabase Storage.
+ * Validates ownership, checks path integrity, and handles external URLs gracefully.
+ */
+export async function safelyDeleteStorageObject(
+  supabase: any,
+  fileUrlOrPath: string | null | undefined,
+  userId: string,
+  bucketName: string = 'documents'
+): Promise<{ deleted: boolean; path?: string; reason?: string }> {
+  const storagePath = await extractTrustedStoragePath(fileUrlOrPath, userId, bucketName);
+  if (!storagePath) {
+    return { deleted: false, reason: 'No trusted local storage path (possibly external URL or invalid path)' };
+  }
+
+  try {
+    const { error } = await supabase.storage.from(bucketName).remove([storagePath]);
+    if (error) {
+      console.warn(`[safelyDeleteStorageObject] Storage removal error for "${storagePath}":`, error.message);
+      return { deleted: false, path: storagePath, reason: error.message };
+    }
+    return { deleted: true, path: storagePath };
+  } catch (err: any) {
+    console.warn(`[safelyDeleteStorageObject] Exception removing "${storagePath}":`, err?.message);
+    return { deleted: false, path: storagePath, reason: err?.message || 'Storage exception' };
+  }
+}
+
+/**
+ * Restores all AI-generated assets linked to a source document in lockstep.
+ * Idempotent: setting deleted_at = null on already restored assets is a safe no-op.
+ */
+export async function restoreAssociatedAiDocuments(
+  supabase: any,
+  userId: string,
+  documentId: string,
+  docTitle?: string | null,
+  subjectId?: string | null
+): Promise<void> {
+  try {
+    const docShortId = documentId.substring(0, 8);
+    const cleanDocTitle = docTitle ? docTitle.replace(/\.[^/.]+$/, '').trim() : '';
+
+    let targetFolderIds: string[] = [];
+    if (subjectId && cleanDocTitle) {
+      const { data: allFolders } = await supabase
+        .from('folders')
+        .select('id, name, parent_folder_id')
+        .eq('user_id', userId)
+        .eq('subject_id', subjectId);
+
+      if (allFolders) {
+        const aiRootIds = new Set(
+          allFolders
+            .filter((f: { parent_folder_id: string | null; name: string }) => f.parent_folder_id === null && f.name.trim().toLowerCase() === 'ai generated')
+            .map((f: { id: string }) => f.id)
+        );
+        const aiCatIds = new Set(
+          allFolders
+            .filter((f: { parent_folder_id: string | null; id: string }) => f.parent_folder_id !== null && aiRootIds.has(f.parent_folder_id))
+            .map((f: { id: string }) => f.id)
+        );
+        targetFolderIds = allFolders
+          .filter((f: { parent_folder_id: string | null; name: string; id: string }) => f.parent_folder_id !== null && aiCatIds.has(f.parent_folder_id) && f.name.trim().toLowerCase() === cleanDocTitle.toLowerCase())
+          .map((f: { id: string }) => f.id);
+      }
+    }
+
+    if (targetFolderIds.length > 0) {
+      await supabase
+        .from('documents')
+        .update({ deleted_at: null })
+        .in('folder_id', targetFolderIds)
+        .eq('user_id', userId);
+    }
+
+    // Restore documents tagged with source_doc
+    await supabase
+      .from('documents')
+      .update({ deleted_at: null })
+      .eq('user_id', userId)
+      .contains('tags', [`source_doc:${documentId}`]);
+
+    // Restore documents with storage path hash
+    await supabase
+      .from('documents')
+      .update({ deleted_at: null })
+      .eq('user_id', userId)
+      .eq('ai_doc_type', 'ai_generated')
+      .ilike('file_url', `%ai-gen-%${docShortId}%`);
+  } catch (syncErr) {
+    console.warn('[restoreAssociatedAiDocuments] AI document sync restore warning:', syncErr);
+  }
+}
+
 /**
  * Permanently removes all AI-generated resources linked to a specific document:
  * 1. AI-generated summary/quiz/flashcard/notes document rows in `documents`
@@ -590,22 +745,9 @@ export async function cleanupAiGeneratedResources(
       }
     }
 
-    // 2. Delete storage files
+    // 2. Safely delete storage files using centralized helper
     for (const fileUrl of storagePathsToDelete) {
-      try {
-        let storagePath = '';
-        if (fileUrl.includes('/documents/')) {
-          storagePath = decodeURIComponent(fileUrl.split('/documents/')[1]?.split('?')[0] || '');
-        } else {
-          const parts = fileUrl.split('/');
-          storagePath = `${userId}/${parts[parts.length - 1]}`;
-        }
-        if (storagePath) {
-          await supabase.storage.from('documents').remove([storagePath]);
-        }
-      } catch (storageErr) {
-        console.warn('[cleanupAiGeneratedResources] Storage remove warning:', storageErr);
-      }
+      await safelyDeleteStorageObject(supabase, fileUrl, userId, 'documents');
     }
 
     // Also remove any files from storage with docShortId pattern directly
@@ -667,24 +809,9 @@ export async function deleteUpload(uploadId: string, documentId: string, fileUrl
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Unauthorized')
 
-  // Extract relative path from public URL to delete from storage
+  // Safely remove primary file from storage bucket if present
   if (fileUrl) {
-    try {
-      let storagePath = '';
-      if (fileUrl.includes('/documents/')) {
-        storagePath = decodeURIComponent(fileUrl.split('/documents/')[1]?.split('?')[0] || '');
-      } else {
-        const pathParts = fileUrl.split('/')
-        const fileName = pathParts[pathParts.length - 1]
-        storagePath = `${user.id}/${fileName}`
-      }
-      if (storagePath) {
-        const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
-        if (storageError) console.error("Storage cleanup failed:", storageError.message)
-      }
-    } catch (storageErr) {
-      console.warn("[deleteUpload] Storage deletion warning:", storageErr)
-    }
+    await safelyDeleteStorageObject(supabase, fileUrl, user.id, 'documents');
   }
 
   // Explicitly delete AI generated summaries, knowledge assets, subfolders, and documents
@@ -798,20 +925,7 @@ export async function deletePendingUpload(documentId: string) {
 
   // 2. Safely remove storage object from documents bucket
   if (doc.file_url) {
-    try {
-      let storagePath = '';
-      if (doc.file_url.includes('/documents/')) {
-        storagePath = decodeURIComponent(doc.file_url.split('/documents/')[1]?.split('?')[0] || '');
-      } else {
-        const parts = doc.file_url.split('/');
-        storagePath = `${user.id}/${parts[parts.length - 1]}`;
-      }
-      if (storagePath) {
-        await supabase.storage.from('documents').remove([storagePath]);
-      }
-    } catch (storageErr: any) {
-      console.warn('[deletePendingUpload] Storage file remove warning:', storageErr?.message);
-    }
+    await safelyDeleteStorageObject(supabase, doc.file_url, user.id, 'documents');
   }
 
   // 3. Delete AI generated summaries & knowledge assets & folders
@@ -1334,58 +1448,7 @@ export async function restoreDocumentFromRecycleBin(documentId: string) {
   }
 
   // 2. Restore all associated AI generated documents in lockstep
-  try {
-    const docShortId = documentId.substring(0, 8);
-    const cleanDocTitle = doc?.title ? doc.title.replace(/\.[^/.]+$/, '').trim() : '';
-
-    let targetFolderIds: string[] = [];
-    if (doc?.subject_id && cleanDocTitle) {
-      const { data: allFolders } = await supabase
-        .from('folders')
-        .select('id, name, parent_folder_id')
-        .eq('user_id', user.id)
-        .eq('subject_id', doc.subject_id);
-
-      if (allFolders) {
-        const aiRootIds = new Set(
-          allFolders
-            .filter((f: { parent_folder_id: string | null; name: string }) => f.parent_folder_id === null && f.name.trim().toLowerCase() === 'ai generated')
-            .map((f: { id: string }) => f.id)
-        );
-        const aiCatIds = new Set(
-          allFolders
-            .filter((f: { parent_folder_id: string | null; id: string }) => f.parent_folder_id !== null && aiRootIds.has(f.parent_folder_id))
-            .map((f: { id: string }) => f.id)
-        );
-        targetFolderIds = allFolders
-          .filter((f: { parent_folder_id: string | null; name: string; id: string }) => f.parent_folder_id !== null && aiCatIds.has(f.parent_folder_id) && f.name.trim().toLowerCase() === cleanDocTitle.toLowerCase())
-          .map((f: { id: string }) => f.id);
-      }
-    }
-
-    if (targetFolderIds.length > 0) {
-      await supabase
-        .from("documents")
-        .update({ deleted_at: null })
-        .in("folder_id", targetFolderIds)
-        .eq("user_id", user.id);
-    }
-
-    await supabase
-      .from("documents")
-      .update({ deleted_at: null })
-      .eq("user_id", user.id)
-      .contains("tags", [`source_doc:${documentId}`]);
-
-    await supabase
-      .from("documents")
-      .update({ deleted_at: null })
-      .eq("user_id", user.id)
-      .eq("ai_doc_type", "ai_generated")
-      .ilike("file_url", `%ai-gen-%${docShortId}%`);
-  } catch (syncErr) {
-    console.warn("[restoreDocumentFromRecycleBin] AI document sync restore warning:", syncErr);
-  }
+  await restoreAssociatedAiDocuments(supabase, user.id, documentId, doc?.title, doc?.subject_id);
 
   revalidatePath("/uploads");
   revalidatePath("/subjects");
@@ -1416,23 +1479,9 @@ export async function deleteDocumentPermanently(documentId: string) {
     documentId
   );
 
-  // 2. Remove storage object for primary file
-  const fileUrl = doc?.file_url;
-  if (fileUrl) {
-    try {
-      let storagePath = '';
-      if (fileUrl.includes('/documents/')) {
-        storagePath = decodeURIComponent(fileUrl.split('/documents/')[1]?.split('?')[0] || '');
-      } else {
-        const parts = fileUrl.split('/');
-        storagePath = `${user.id}/${parts[parts.length - 1]}`;
-      }
-      if (storagePath) {
-        await supabase.storage.from('documents').remove([storagePath]);
-      }
-    } catch (storageErr: any) {
-      console.warn("[deleteDocumentPermanently] Storage removal warning:", storageErr?.message);
-    }
+  // 2. Remove storage object for primary file using centralized helper
+  if (doc?.file_url) {
+    await safelyDeleteStorageObject(supabase, doc.file_url, user.id, 'documents');
   }
 
   // 3. Delete primary document row

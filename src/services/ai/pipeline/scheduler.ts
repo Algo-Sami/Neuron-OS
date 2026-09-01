@@ -699,12 +699,14 @@ export class AIJobScheduler {
 
       if (!summaryResult.success || !summaryResult.summary) {
         const errMsg = summaryResult.errorMessage || 'Summary generation returned an empty result.';
-        this.logDisk('summaryGen', 'Summary Generation Failed', 'ERROR');
-        this.logDisk('summaryGen', `Failure Details — document: ${this.documentId}, user: ${this.userId}, stage: summaryGen, duration: ${summaryDurationMs}ms, reason: ${errMsg}`, 'ERROR');
-        this.logDisk('summaryGen', `[RetryDecision] stage=summaryGen error="${errMsg}" retryable=true action=retry_with_backoff`, 'WARN');
+        const isRateLimited = summaryResult.errorCategory?.startsWith('rate_limit') || !!summaryResult.cooldownUntil;
+        const cooldownUntil = summaryResult.cooldownUntil || (isRateLimited ? new Date(Date.now() + 60000).toISOString() : null);
+
+        this.logDisk('summaryGen', isRateLimited ? 'Summary Generation Rate Limited' : 'Summary Generation Failed', isRateLimited ? 'WARN' : 'ERROR');
+        this.logDisk('summaryGen', `Failure Details — document: ${this.documentId}, user: ${this.userId}, stage: summaryGen, category: ${summaryResult.errorCategory || 'unknown'}, cooldown: ${cooldownUntil || 'none'}, reason: ${errMsg}`, isRateLimited ? 'WARN' : 'ERROR');
         
         this.updateStage('summaryGen', {
-          status: 'failed',
+          status: isRateLimited ? 'failed' : 'failed',
           endTime: new Date().toISOString(),
           durationMs: summaryDurationMs,
           errorMessage: errMsg
@@ -712,12 +714,23 @@ export class AIJobScheduler {
 
         // Preserve knowledge base readiness (partial success)
         await this.supabase.from('document_knowledge').update({
-          current_processing_stage: 'Summary Failed',
+          current_processing_stage: isRateLimited ? 'AI Rate Limited' : 'Summary Failed',
           embedding_status: 'completed',
           updated_at: new Date().toISOString()
         }).eq('document_id', this.documentId);
 
-        await this.saveProgress('Failed', errMsg);
+        // Update documents table with persistent cooldown and normalized error category
+        await this.supabase.from('documents').update({
+          summary_status: isRateLimited ? 'rate_limited' : 'failed',
+          ai_error_category: summaryResult.errorCategory || (isRateLimited ? 'rate_limit_temporary' : 'unknown'),
+          ai_error_code: summaryResult.normalizedError?.providerCode || (isRateLimited ? 'RATE_LIMIT_EXCEEDED' : 'FAILED'),
+          ai_error_message: errMsg,
+          ai_cooldown_until: cooldownUntil,
+          ai_last_failed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq('id', this.documentId);
+
+        await this.saveProgress(isRateLimited ? 'AI Rate Limited' : 'Failed', errMsg);
         return;
       }
 
@@ -741,6 +754,10 @@ export class AIJobScheduler {
 
       await this.supabase.from('documents').update({
         summary_status: 'completed',
+        ai_error_category: null,
+        ai_error_code: null,
+        ai_error_message: null,
+        ai_cooldown_until: null,
         updated_at: new Date().toISOString()
       }).eq('id', this.documentId);
 

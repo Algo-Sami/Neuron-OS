@@ -47,9 +47,15 @@ export async function POST(request: NextRequest) {
     logger.info(`[generate-study-pack] Dispatched document ${documentId} in ${reqDuration}ms: status=${result.status}, jobId=${result.jobId}`);
 
     if (!result.success) {
+      const isCooldown = result.code === 'AI_COOLDOWN_ACTIVE' || result.status === 'rate_limited';
       return NextResponse.json(
-        { error: result.error || result.message || 'Dispatch failed', taskId: result.taskId },
-        { status: result.status === 'error' ? 500 : 200 }
+        {
+          error: result.error || result.message || 'Dispatch failed',
+          code: result.code,
+          cooldownUntil: result.cooldownUntil,
+          taskId: result.taskId
+        },
+        { status: isCooldown ? 429 : result.status === 'error' ? 500 : 200 }
       );
     }
 

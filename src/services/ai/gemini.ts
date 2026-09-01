@@ -3,6 +3,7 @@ import { logger } from '@/lib/logger';
 import { ExtractedDeadline, DocumentClassification, GeneratedQuestion } from '@/types';
 import { AI_CONFIG } from '@/config';
 import { MAX_CLASSIFICATION_TEXT_LENGTH, MAX_QUIZ_TEXT_LENGTH } from '@/constants';
+import { executeWithAIRetry } from './errors/retry-policy';
 
 // Lazy initialize the Gemini client to avoid crashes if environment variables are not set yet
 let ai: GoogleGenerativeAI | null = null;
@@ -86,14 +87,19 @@ export async function extractDeadlinesFromText(text: string): Promise<ExtractedD
       \"\"\"
     `;
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: responseSchema,
-        temperature: 0.1, // Low temperature for maximum factual extraction
-      }
-    });
+    const result = await executeWithAIRetry(
+      async () => {
+        return await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: responseSchema,
+            temperature: 0.1, // Low temperature for maximum factual extraction
+          }
+        });
+      },
+      { operation: 'extract_deadlines', providerName: 'gemini' }
+    );
 
     const responseText = result.response.text();
     if (!responseText) return [];
@@ -187,14 +193,19 @@ export async function classifyAcademicDocument(
       4. Output: Produce output strictly formatted to the JSON schema.
     `;
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: responseSchema,
-        temperature: 0.1,
-      }
-    });
+    const result = await executeWithAIRetry(
+      async () => {
+        return await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: responseSchema,
+            temperature: 0.1,
+          }
+        });
+      },
+      { operation: 'classify_document', providerName: 'gemini' }
+    );
 
     const responseText = result.response.text();
     if (!responseText) {
@@ -358,14 +369,19 @@ export async function generateQuizFromText(
       Output the quiz strictly matching the designated JSON Schema array format.
     `;
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: responseSchema,
-        temperature: 0.2, // Moderate temperature for robust conceptual structure
-      }
-    });
+    const result = await executeWithAIRetry(
+      async () => {
+        return await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: responseSchema,
+            temperature: 0.2, // Moderate temperature for robust conceptual structure
+          }
+        });
+      },
+      { operation: 'generate_quiz', providerName: 'gemini' }
+    );
 
     const responseText = result.response.text();
     if (!responseText) {

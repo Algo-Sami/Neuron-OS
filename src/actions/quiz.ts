@@ -355,62 +355,25 @@ export async function submitQuizAction(
       })
       .eq("user_id", user.id);
 
-    // 9. Award Quiz XP & Daily Challenge XP
-    const result = await awardXP(user.id, "complete_quiz", { score: correctCount, totalQuestions });
-    const extraXP = totalQuizXP + dailyChallengeXP - (correctCount === totalQuestions ? 250 : 150);
+    // 9. Award Quiz XP & Daily Challenge XP (Synchronized Base + Bonus XP in awardXP)
+    const extraXP = Math.max(0, totalQuizXP + dailyChallengeXP - (correctCount === totalQuestions ? 250 : 150));
+    const result = await awardXP(user.id, "complete_quiz", {
+      score: correctCount,
+      totalQuestions,
+      bonusXp: extraXP
+    });
     
-    let finalXP = result.newXp;
-    let finalLevel = result.newLevel;
-    let finalLeveledUp = result.levelUp;
+    const finalXP = result.newXp;
+    const finalLevel = result.newLevel;
+    const finalLeveledUp = result.levelUp;
 
     if (extraXP > 0) {
-      const getCumulativeXpForLevel = (lvl: number) => {
-        let sum = 0;
-        for (let i = 1; i < lvl; i++) {
-          sum += i * 1000;
-        }
-        return sum;
-      };
-
-      const finalProgressXp = result.newXp + extraXP;
-      let tempLevel = result.newLevel;
-      let hasLeveledUp = false;
-      let targetXpForNext = getCumulativeXpForLevel(tempLevel + 1);
-
-      while (finalProgressXp >= targetXpForNext) {
-        tempLevel++;
-        hasLeveledUp = true;
-        targetXpForNext = getCumulativeXpForLevel(tempLevel + 1);
-      }
-
-      await supabase
-        .from("user_progress")
-        .update({
-          total_xp: finalProgressXp,
-          current_level: tempLevel,
-          updated_at: new Date().toISOString()
-        })
-        .eq("user_id", user.id);
-
-      finalXP = finalProgressXp;
-      finalLevel = tempLevel;
-      finalLeveledUp = result.levelUp || hasLeveledUp;
-
       await supabase.from("notifications").insert({
         user_id: user.id,
         title: `+${extraXP} Gamification Bonuses!`,
         message: `Earned ${extraXP} XP for completing with Speed, Combos, and Daily Streak multipliers!`,
         type: "system"
       });
-
-      if (hasLeveledUp && !result.levelUp) {
-        await supabase.from("notifications").insert({
-          user_id: user.id,
-          title: "🎉 Level Up!",
-          message: `Congratulations! You leveled up to Level ${tempLevel}!`,
-          type: "alert"
-        });
-      }
     }
 
     return {

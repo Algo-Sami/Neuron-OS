@@ -195,48 +195,67 @@ export async function deleteUserAccountAction() {
       return { success: false, error: `Failed to cancel active tasks: ${cancelErr.message}` };
     }
 
-    // Helper for recursive storage clean-up of a user's directory
-    const deleteRecursive = async (bucket: string, folderPath: string) => {
-      const { data: files, error: listError } = await supabase.storage.from(bucket).list(folderPath);
-      if (listError) {
-        throw new Error(`Failed to list storage folder "${folderPath}" in bucket "${bucket}": ${listError.message}`);
-      }
-      if (!files || files.length === 0) return;
-
-      const filesToDelete: string[] = [];
-      for (const file of files) {
-        const fullPath = folderPath ? `${folderPath}/${file.name}` : file.name;
-        // In Supabase storage, directories have null metadata/id
-        if (!file.id || !file.metadata) {
-          await deleteRecursive(bucket, fullPath);
-        } else {
-          filesToDelete.push(fullPath);
-        }
+    // Hardened helper for recursive storage clean-up of a user's directory
+    const deleteRecursiveStoragePath = async (bucket: string, prefix: string) => {
+      // User isolation security guard: prefix must be scoped to the authenticated user
+      if (!prefix || !prefix.startsWith(user.id)) {
+        console.warn(`[deleteRecursiveStoragePath] Security boundary: Blocked deletion for path "${prefix}" outside user scope "${user.id}"`);
+        return;
       }
 
-      if (filesToDelete.length > 0) {
-        const { error: removeError } = await supabase.storage.from(bucket).remove(filesToDelete);
-        if (removeError) {
-          throw new Error(`Failed to delete storage objects in "${folderPath}" of bucket "${bucket}": ${removeError.message}`);
+      try {
+        const { data: items, error: listError } = await supabase.storage.from(bucket).list(prefix);
+        if (listError) {
+          console.warn(`[deleteRecursiveStoragePath] Non-fatal list warning for "${prefix}" in bucket "${bucket}":`, listError.message);
+          return;
         }
+        if (!items || items.length === 0) return;
+
+        const filesToDelete: string[] = [];
+        for (const item of items) {
+          const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
+          
+          // Resilient detection: If item has explicit file metadata, mark for batch removal.
+          // Otherwise, test whether it's a directory by attempting a child listing.
+          const hasFileMetadata = item.metadata && (item.metadata.mimetype || typeof item.metadata.size === "number");
+
+          if (hasFileMetadata) {
+            filesToDelete.push(fullPath);
+          } else {
+            try {
+              const { data: subItems, error: subListErr } = await supabase.storage.from(bucket).list(fullPath);
+              if (!subListErr && subItems && subItems.length > 0) {
+                // Non-empty folder -> recurse
+                await deleteRecursiveStoragePath(bucket, fullPath);
+              } else {
+                // Either an empty folder, single leaf object, or metadata-less file -> mark for removal
+                filesToDelete.push(fullPath);
+              }
+            } catch {
+              filesToDelete.push(fullPath);
+            }
+          }
+        }
+
+        if (filesToDelete.length > 0) {
+          try {
+            const { error: removeError } = await supabase.storage.from(bucket).remove(filesToDelete);
+            if (removeError) {
+              console.warn(`[deleteRecursiveStoragePath] Non-fatal batch remove warning in "${prefix}":`, removeError.message);
+            }
+          } catch (batchErr) {
+            console.warn(`[deleteRecursiveStoragePath] Batch remove exception in "${prefix}":`, batchErr);
+          }
+        }
+      } catch (traversalErr: any) {
+        console.warn(`[deleteRecursiveStoragePath] Non-fatal traversal error in bucket "${bucket}" path "${prefix}":`, traversalErr?.message);
       }
     };
 
     // 3. Delete generated AI resources & user uploaded files from Storage recursively
     console.log("Recursively deleting storage folders...");
-    try {
-      await deleteRecursive("documents", user.id);
-    } catch (docStorageErr: any) {
-      console.error("Documents storage cleanup failed:", docStorageErr.message);
-      return { success: false, error: docStorageErr.message };
-    }
-
-    try {
-      await deleteRecursive("avatars", user.id);
-    } catch (avatarStorageErr: any) {
-      console.error("Avatars storage cleanup failed:", avatarStorageErr.message);
-      return { success: false, error: avatarStorageErr.message };
-    }
+    await deleteRecursiveStoragePath("documents", user.id);
+    await deleteRecursiveStoragePath("avatars", user.id);
 
     // 4. Delete database records & authentication account
     console.log("Executing DB delete_user_account RPC...");

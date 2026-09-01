@@ -540,7 +540,7 @@ export async function reconcileOrphanedAiGeneratedFolders(
                 if (storagePath) {
                   await supabase.storage.from('documents').remove([storagePath]);
                 }
-              } catch (e) {
+              } catch {
                 // ignore
               }
             }

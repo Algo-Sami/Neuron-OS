@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { deleteSubjectPermanently } from "@/actions/subjects";
-import { deleteUpload } from "@/actions/uploads";
+import { deleteDocumentPermanently, restoreAssociatedAiDocuments } from "@/actions/uploads";
 import { createFolderAction } from "@/actions/folders";
 
 export async function restoreRecycleBinItemAction(
@@ -28,10 +28,32 @@ export async function restoreRecycleBinItemAction(
       .eq("id", id)
       .eq("user_id", user.id);
     if (error) throw new Error(error.message);
+
+    // Cascade restore all documents in this subject
+    await supabase
+      .from("documents")
+      .update({ deleted_at: null })
+      .eq("subject_id", id)
+      .eq("user_id", user.id);
+
+    // Cascade restore all folders in this subject
+    await supabase
+      .from("folders")
+      .update({ deleted_at: null })
+      .eq("subject_id", id)
+      .eq("user_id", user.id);
   } else {
     // Restore document
     const targetSubjectId = options?.targetSubjectId;
     let targetFolderId = options?.targetFolderId;
+
+    // Fetch existing document to get metadata
+    const { data: doc } = await supabase
+      .from("documents")
+      .select("id, title, subject_id, folder_id")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
     if (options?.recreateFolderName && targetSubjectId) {
       // Recreate missing folder
@@ -58,7 +80,18 @@ export async function restoreRecycleBinItemAction(
       .update(updateData)
       .eq("id", id)
       .eq("user_id", user.id);
+
     if (error) throw new Error(error.message);
+
+    // Lockstep restore for all associated AI generated documents & folders
+    const effectiveSubjectId = targetSubjectId !== undefined ? targetSubjectId : doc?.subject_id;
+    await restoreAssociatedAiDocuments(
+      supabase,
+      user.id,
+      id,
+      doc?.title,
+      effectiveSubjectId
+    );
   }
 
   revalidatePath("/subjects");
@@ -81,15 +114,39 @@ export async function restoreMultipleItemsAction(
         .update({ deleted_at: null })
         .eq("id", item.id)
         .eq("user_id", user.id);
+
+      await supabase
+        .from("documents")
+        .update({ deleted_at: null })
+        .eq("subject_id", item.id)
+        .eq("user_id", user.id);
+
+      await supabase
+        .from("folders")
+        .update({ deleted_at: null })
+        .eq("subject_id", item.id)
+        .eq("user_id", user.id);
     } else {
-      // For simple bulk restore, set deleted_at to null.
-      // If original folder is missing, UI will intercept and use single restore action
-      // with location resolution.
+      const { data: doc } = await supabase
+        .from("documents")
+        .select("id, title, subject_id")
+        .eq("id", item.id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
       await supabase
         .from("documents")
         .update({ deleted_at: null })
         .eq("id", item.id)
         .eq("user_id", user.id);
+
+      await restoreAssociatedAiDocuments(
+        supabase,
+        user.id,
+        item.id,
+        doc?.title,
+        doc?.subject_id
+      );
     }
   }
 
@@ -110,35 +167,9 @@ export async function deleteMultipleItemsAction(
     if (item.type === "subject") {
       await deleteSubjectPermanently(item.id);
     } else {
-      const { data: doc } = await supabase
-        .from("documents")
-        .select("upload_id, file_url")
-        .eq("id", item.id)
-        .eq("user_id", user.id)
-        .single();
-
-      if (doc) {
-        if (doc.upload_id) {
-          await deleteUpload(doc.upload_id, item.id, doc.file_url);
-        } else {
-          // Just delete document row & related AI summaries if no upload log exists
-          try {
-            await supabase.from("ai_summaries").delete().eq("document_id", item.id);
-            await supabase.from("knowledge_assets").delete().eq("document_id", item.id);
-            await supabase.from("quizzes").delete().eq("document_id", item.id);
-            await supabase.from("flashcards").delete().eq("document_id", item.id);
-            await supabase.from("document_chunks").delete().eq("document_id", item.id);
-          } catch (err) {
-            console.warn("[deleteMultipleItemsAction] AI cleanup warning:", err);
-          }
-
-          await supabase
-            .from("documents")
-            .delete()
-            .eq("id", item.id)
-            .eq("user_id", user.id);
-        }
-      }
+      // Calls authoritative permanent deletion helper that always removes physical storage file
+      // and cleans up all AI-generated physical PDFs, folders, and metadata
+      await deleteDocumentPermanently(item.id);
     }
   }
 
@@ -167,34 +198,16 @@ export async function emptyRecycleBinAction() {
     }
   }
 
-  // 2. Permanently delete recycled documents (calls deleteUpload for storage cleanup)
+  // 2. Permanently delete recycled documents (calls deleteDocumentPermanently for physical storage and AI cleanup)
   const { data: recycledDocs } = await supabase
     .from("documents")
-    .select("id, upload_id, file_url")
+    .select("id")
     .eq("user_id", user.id)
     .not("deleted_at", "is", null);
 
   if (recycledDocs && recycledDocs.length > 0) {
     for (const doc of recycledDocs) {
-      if (doc.upload_id) {
-        await deleteUpload(doc.upload_id, doc.id, doc.file_url);
-      } else {
-        try {
-          await supabase.from("ai_summaries").delete().eq("document_id", doc.id);
-          await supabase.from("knowledge_assets").delete().eq("document_id", doc.id);
-          await supabase.from("quizzes").delete().eq("document_id", doc.id);
-          await supabase.from("flashcards").delete().eq("document_id", doc.id);
-          await supabase.from("document_chunks").delete().eq("document_id", doc.id);
-        } catch (err) {
-          console.warn("[emptyRecycleBinAction] AI cleanup warning:", err);
-        }
-
-        await supabase
-          .from("documents")
-          .delete()
-          .eq("id", doc.id)
-          .eq("user_id", user.id);
-      }
+      await deleteDocumentPermanently(doc.id);
     }
   }
 
@@ -204,3 +217,4 @@ export async function emptyRecycleBinAction() {
   revalidatePath("/recycle-bin");
   return { success: true };
 }
+

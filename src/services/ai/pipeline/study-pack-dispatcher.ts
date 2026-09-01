@@ -35,8 +35,10 @@ export interface DispatchResult {
   success: boolean;
   taskId?: string;
   jobId?: string | null;
-  status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'error';
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'rate_limited' | 'error';
   deduplicated?: boolean;
+  code?: string;
+  cooldownUntil?: string;
   message?: string;
   error?: string;
 }
@@ -51,7 +53,7 @@ export async function dispatchStudyPackGeneration(params: DispatchParams): Promi
     // 1. Verify document exists, belongs to user, and has subject assigned
     const { data: doc, error: docErr } = await supabase
       .from('documents')
-      .select('id, subject_id, ai_topic, folder_id, folders(name)')
+      .select('id, subject_id, ai_topic, folder_id, ai_cooldown_until, folders(name)')
       .eq('id', documentId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -59,6 +61,19 @@ export async function dispatchStudyPackGeneration(params: DispatchParams): Promi
     if (docErr || !doc) {
       logger.error('[Dispatcher] Failed to fetch document: ' + (docErr?.message || 'Not found'));
       return { success: false, status: 'error', error: 'Document not found' };
+    }
+
+    // Server-Side Cooldown Guard
+    if (doc.ai_cooldown_until && new Date(doc.ai_cooldown_until) > new Date()) {
+      logger.warn(`[Dispatcher] Rejecting dispatch for document "${documentId}" — cooldown active until ${doc.ai_cooldown_until}`);
+      return {
+        success: false,
+        status: 'rate_limited',
+        code: 'AI_COOLDOWN_ACTIVE',
+        cooldownUntil: doc.ai_cooldown_until,
+        message: `AI rate limit cooldown is active. Please wait until ${doc.ai_cooldown_until} before retrying.`,
+        error: 'AI_COOLDOWN_ACTIVE'
+      };
     }
 
     if (!doc.subject_id) {
