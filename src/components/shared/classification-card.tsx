@@ -67,7 +67,7 @@ const DEFAULT_FOLDERS = [
   "Notes",
 ];
 
-function ReviewDialog({
+export function ReviewDialog({
   open,
   onClose,
   doc,

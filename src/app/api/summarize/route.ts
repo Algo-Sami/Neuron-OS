@@ -55,8 +55,8 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Document ownership verification ───────────────────────────────────────
-
-    const { data: document, error: docError } = await supabase
+    let document: any = null;
+    const { data: extDoc, error: extError } = await supabase
       .from('documents')
       .select('id, title, summary_status, ai_cooldown_until')
       .eq('id', documentId)
@@ -64,8 +64,23 @@ export async function POST(request: NextRequest) {
       .is('deleted_at', null)
       .single();
 
-    if (docError || !document) {
+    if (extError && (extError.code === 'PGRST204' || extError.message?.includes('ai_cooldown_until') || extError.message?.includes('column'))) {
+      const { data: baseDoc, error: baseError } = await supabase
+        .from('documents')
+        .select('id, title, summary_status')
+        .eq('id', documentId)
+        .eq('user_id', user.id)
+        .is('deleted_at', null)
+        .single();
+
+      if (baseError || !baseDoc) {
+        return NextResponse.json({ error: 'Document not found or access denied' }, { status: 404 });
+      }
+      document = baseDoc;
+    } else if (extError || !extDoc) {
       return NextResponse.json({ error: 'Document not found or access denied' }, { status: 404 });
+    } else {
+      document = extDoc;
     }
 
     // Server-Side Cooldown Guard

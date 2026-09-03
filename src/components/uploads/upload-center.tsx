@@ -48,7 +48,8 @@ import {
   saveUploadMetadata, 
   moveDocumentToRecycleBin, 
   checkDuplicateUploadAction,
-  getSummaryFileLocationAction
+  getSummaryFileLocationAction,
+  rejectOrCustomizeClassification,
 } from "@/actions/uploads";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -68,7 +69,7 @@ import { useSettingsStore } from "@/store/settings-store";
 import { classifyFile } from "@/services/ai/ai-classification";
 import { AIStudyPackDialog } from "./ai-study-pack-dialog";
 import { DuplicateUploadDialog } from "./duplicate-upload-dialog";
-import { ClassificationCard, type PendingDoc } from "@/components/shared/classification-card";
+import { ClassificationCard, ReviewDialog, type PendingDoc } from "@/components/shared/classification-card";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -389,10 +390,12 @@ function UploadStatisticsStrip({
 
 function UploadArea({
   subjects,
+  documents = [],
   onUploadComplete,
   dropZoneRef,
 }: {
   subjects: SubjectItem[];
+  documents?: DocumentRow[];
   onUploadComplete: () => void;
   dropZoneRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -411,6 +414,75 @@ function UploadArea({
     fileName: string;
     fileTypeLabel: string;
   } | null>(null);
+
+  const [reviewDocItem, setReviewDocItem] = useState<PendingDoc | null>(null);
+  const [isAssigning, startAssignTransition] = useTransition();
+
+  const handleReviewAssign = (
+    docId: string,
+    subjectName: string,
+    topic: string
+  ) => {
+    startAssignTransition(async () => {
+      try {
+        await rejectOrCustomizeClassification(docId, subjectName, topic);
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.documentId === docId
+              ? {
+                  ...q,
+                  status: "success",
+                  destinationSubject: subjectName,
+                  destinationFolder: topic,
+                }
+              : q
+          )
+        );
+        setReviewDocItem(null);
+        onUploadComplete();
+      } catch (err) {
+        console.error("Failed to assign subject:", err);
+      }
+    });
+  };
+
+  // Synchronize queue items with incoming document changes (e.g. when confirmed via Needs Your Attention or real-time sync)
+  useEffect(() => {
+    if (!documents || documents.length === 0) return;
+
+    setQueue((prevQueue) => {
+      let hasChanges = false;
+      const updated = prevQueue.map((item) => {
+        if (!item.documentId) return item;
+
+        const matchedDoc = documents.find((d) => d.id === item.documentId);
+        if (!matchedDoc) return item;
+
+        const subject = subjects.find((s) => s.id === matchedDoc.subject_id);
+        const resolvedSubjectName = matchedDoc.ai_subject || subject?.name || item.destinationSubject || null;
+        const resolvedFolderName = matchedDoc.ai_topic || item.destinationFolder || "Lectures";
+        const isConfirmed = Boolean(
+          matchedDoc.subject_id &&
+          matchedDoc.classification_status !== "needs_review" &&
+          matchedDoc.classification_status !== "pending"
+        );
+
+        if (isConfirmed && (item.status === "needs_review" || item.destinationSubject !== resolvedSubjectName || item.destinationFolder !== resolvedFolderName)) {
+          hasChanges = true;
+          return {
+            ...item,
+            status: "success" as QueueItemStatus,
+            destinationSubject: resolvedSubjectName,
+            destinationFolder: resolvedFolderName,
+          };
+        }
+
+        return item;
+      });
+
+      return hasChanges ? updated : prevQueue;
+    });
+  }, [documents, subjects]);
 
   const [duplicateDialogItem, setDuplicateDialogItem] = useState<{
     item: UploadQueueItem;
@@ -988,10 +1060,32 @@ function UploadArea({
                       )}
 
                       {item.status === "needs_review" && (
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" />
-                          Needs confirmation
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            Needs confirmation
+                          </span>
+                          {item.documentId && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setReviewDocItem({
+                                  id: item.documentId!,
+                                  title: item.name,
+                                  ai_subject: item.destinationSubject || null,
+                                  ai_topic: item.destinationFolder || "Lectures",
+                                  ai_doc_type: item.type,
+                                  classification_confidence: item.classification?.confidence || 0.5,
+                                });
+                              }}
+                              className="h-6 text-[10px] px-2 py-0 rounded border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
+                            >
+                              Review
+                            </Button>
+                          )}
+                        </div>
                       )}
 
                       {item.status === "duplicate" && (
@@ -1122,6 +1216,17 @@ function UploadArea({
           setPendingDoc(null);
         }}
       />
+
+      {reviewDocItem && (
+        <ReviewDialog
+          open={!!reviewDocItem}
+          onClose={() => setReviewDocItem(null)}
+          doc={reviewDocItem}
+          subjects={subjects}
+          onAssign={handleReviewAssign}
+          isPending={isAssigning}
+        />
+      )}
     </div>
   );
 }
@@ -2354,6 +2459,7 @@ export function UploadCenter({
       {/* 1. Main Upload Area */}
       <UploadArea
         subjects={subjects}
+        documents={documents}
         onUploadComplete={handleUploadComplete}
         dropZoneRef={dropZoneRef}
       />

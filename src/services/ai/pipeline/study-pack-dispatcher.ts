@@ -51,16 +51,33 @@ export async function dispatchStudyPackGeneration(params: DispatchParams): Promi
 
   try {
     // 1. Verify document exists, belongs to user, and has subject assigned
-    const { data: doc, error: docErr } = await supabase
+    let doc: any = null;
+    const { data: extDoc, error: extErr } = await supabase
       .from('documents')
       .select('id, subject_id, ai_topic, folder_id, ai_cooldown_until, folders(name)')
       .eq('id', documentId)
       .eq('user_id', userId)
       .maybeSingle();
 
-    if (docErr || !doc) {
-      logger.error('[Dispatcher] Failed to fetch document: ' + (docErr?.message || 'Not found'));
+    if (extErr && (extErr.code === 'PGRST204' || extErr.message?.includes('ai_cooldown_until') || extErr.message?.includes('column'))) {
+      // Graceful fallback if migration 20260902 has not been applied yet
+      const { data: baseDoc, error: baseErr } = await supabase
+        .from('documents')
+        .select('id, subject_id, ai_topic, folder_id, folders(name)')
+        .eq('id', documentId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (baseErr || !baseDoc) {
+        logger.error('[Dispatcher] Failed to fetch document (base fallback): ' + (baseErr?.message || 'Not found'));
+        return { success: false, status: 'error', error: 'Document not found' };
+      }
+      doc = baseDoc;
+    } else if (extErr || !extDoc) {
+      logger.error('[Dispatcher] Failed to fetch document: ' + (extErr?.message || 'Not found'));
       return { success: false, status: 'error', error: 'Document not found' };
+    } else {
+      doc = extDoc;
     }
 
     // Server-Side Cooldown Guard

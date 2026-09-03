@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopNav } from "@/components/layout/top-nav";
 import { NavProgress } from "@/components/layout/nav-progress";
+import { ProfileCompletionModal } from "@/components/profile/profile-completion-modal";
 
 // Routes that need full-height, no-padding explorer mode
 const EXPLORER_ROUTES = ["/subjects", "/recycle-bin"];
@@ -52,6 +53,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </main>
         )}
       </div>
+
+      {/* Profile completion nudge — floats over all dashboard pages.
+          Rendered outside the main scroll area so it never moves with page content.
+          Suspense guard prevents any data-fetch error from crashing the shell. */}
+      <Suspense fallback={null}>
+        <ProfileCompletionModal />
+      </Suspense>
     </div>
   );
 }

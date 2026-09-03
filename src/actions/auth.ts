@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getProfileCompletion } from "@/lib/profile-completion";
 
 /**
  * Validates whether a username is already taken.
@@ -162,6 +163,51 @@ export async function signOutUser() {
   await supabase.auth.signOut();
   revalidatePath("/", "layout");
   return { success: true };
+}
+
+/**
+ * Lightweight signup — email + password only.
+ *
+ * Returns:
+ *   { success: true, requiresConfirmation: false } → redirect to /dashboard
+ *   { success: true, requiresConfirmation: true }  → show "check your email" message
+ *   { success: false, error: string }               → show error
+ *
+ * The DB trigger on auth.users auto-creates a profiles row with defaults,
+ * so no extra profile write is needed here.
+ */
+export async function quickSignUp(
+  email: string,
+  password: string
+): Promise<{ success: boolean; requiresConfirmation?: boolean; error?: string }> {
+  if (!email || !password) {
+    return { success: false, error: "Email and password are required." };
+  }
+  if (password.length < 8) {
+    return { success: false, error: "Password must be at least 8 characters." };
+  }
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.signUp({ email, password });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    // Supabase returns a session=null when email confirmation is required.
+    // In that case we must NOT redirect to /dashboard — the session won't exist yet.
+    const requiresConfirmation = !data.session;
+
+    if (!requiresConfirmation) {
+      revalidatePath("/", "layout");
+    }
+
+    return { success: true, requiresConfirmation };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
+    return { success: false, error: msg };
+  }
 }
 
 /**

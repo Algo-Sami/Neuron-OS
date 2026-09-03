@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { getDynamicActivityStats, ensureAchievementsExist } from "@/services/gamification/rewards";
 import { ProfileClient, BadgeItem } from "@/components/profile/profile-client";
+import { ProfileCompletionChecklist } from "@/components/profile/profile-completion-modal";
+import { getProfileCompletionData } from "@/actions/profile";
 import { redirect } from "next/navigation";
 
 export const metadata = {
@@ -97,28 +99,39 @@ export default async function ProfilePage() {
   // 4. Calculate dynamic study metrics and streaks
   const activityStats = await getDynamicActivityStats(user.id);
 
-  // 5. Render client profile console
+  // 5. Fetch profile completion score for the in-page checklist
+  const completionData = await getProfileCompletionData();
+
+  // 6. Render client profile console
   return (
-    <ProfileClient
-      user={{ id: user.id, email: user.email || "" }}
-      profile={{
-        first_name: profile?.first_name ?? "",
-        last_name: profile?.last_name ?? "",
-        university: profile?.university ?? "",
-        major: profile?.major ?? "",
-        avatar_url: profile?.avatar_url ?? null
-      }}
-      progress={{
-        total_xp: progress?.total_xp ?? 0,
-        current_level: progress?.current_level ?? 1
-      }}
-      stats={{
-        currentStreak: activityStats.currentStreak,
-        highestStreak: activityStats.highestStreak,
-        activeDaysCount: activityStats.activeDaysCount,
-        totalStudyMinutes: activityStats.totalStudyMinutes
-      }}
-      unlockedBadges={unlockedBadges}
-    />
+    <div className="space-y-4">
+      {/* Profile completion checklist — only shown when profile is incomplete */}
+      {completionData && completionData.percentage < 100 && (
+        <ProfileCompletionChecklist data={completionData} />
+      )}
+
+      <ProfileClient
+        user={{ id: user.id, email: user.email || "" }}
+        profile={{
+          first_name: profile?.first_name ?? "",
+          last_name: profile?.last_name ?? "",
+          university: profile?.university ?? "",
+          major: profile?.major ?? "",
+          avatar_url: profile?.avatar_url ?? null
+        }}
+        progress={{
+          total_xp: progress?.total_xp ?? 0,
+          current_level: progress?.current_level ?? 1
+        }}
+        stats={{
+          currentStreak: activityStats.currentStreak,
+          highestStreak: activityStats.highestStreak,
+          activeDaysCount: activityStats.activeDaysCount,
+          totalStudyMinutes: activityStats.totalStudyMinutes
+        }}
+        unlockedBadges={unlockedBadges}
+      />
+    </div>
   );
 }
+

@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getProfileCompletion, ProfileCompletionResult } from "@/lib/profile-completion";
 
 export async function updateProfile({
   firstName,
@@ -44,4 +45,46 @@ export async function updateProfile({
   revalidatePath("/dashboard");
 
   return { success: true };
+}
+
+/**
+ * Fetches the current user's profile row and returns a computed
+ * completion score. Used by the ProfileCompletionModal and profile page.
+ */
+export async function getProfileCompletionData(): Promise<ProfileCompletionResult | null> {
+  try {
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) return null;
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select(
+        "full_name, username, university, degree_program, profile_image, avatar_url, interests, study_goals"
+      )
+      .eq("id", user.id)
+      .maybeSingle();
+
+    // email_confirmed_at being non-null means the email is verified
+    const emailVerified = !!(user.email_confirmed_at);
+
+    return getProfileCompletion(
+      {
+        email: user.email,
+        emailVerified,
+        full_name: profile?.full_name,
+        username: profile?.username,
+        university: profile?.university,
+        degree_program: profile?.degree_program,
+        profile_image: profile?.profile_image,
+        avatar_url: profile?.avatar_url,
+        interests: profile?.interests,
+        study_goals: profile?.study_goals,
+      },
+      emailVerified
+    );
+  } catch {
+    return null;
+  }
 }
