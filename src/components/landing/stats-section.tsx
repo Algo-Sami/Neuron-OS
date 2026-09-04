@@ -7,33 +7,33 @@ const STATS = [
     value: 50000,
     suffix: "+",
     label: "Lectures Processed",
-    color: "text-violet-400",
+    color: "text-[#0078d4]",
     description: "PDFs, slides, and docs analyzed",
   },
   {
     value: 120000,
     suffix: "+",
     label: "AI Summaries Generated",
-    color: "text-cyan-400",
+    color: "text-[#005a9e]",
     description: "Instant structured notes",
   },
   {
     value: 35000,
     suffix: "+",
     label: "Quizzes Created",
-    color: "text-indigo-400",
+    color: "text-[#107c41]",
     description: "Auto-generated from lectures",
   },
   {
     value: 10,
     suffix: "hrs/wk",
     label: "Average Time Saved",
-    color: "text-emerald-400",
+    color: "text-[#004578]",
     description: "Per student, per week",
   },
 ];
 
-function useCountUp(target: number, duration: number = 2000, isVisible: boolean) {
+function useCountUp(target: number, duration: number = 1800, isVisible: boolean) {
   const [count, setCount] = useState(0);
   const startTime = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -46,7 +46,6 @@ function useCountUp(target: number, duration: number = 2000, isVisible: boolean)
       if (!startTime.current) startTime.current = timestamp;
       const elapsed = timestamp - startTime.current;
       const progress = Math.min(elapsed / duration, 1);
-      // Ease out cubic
       const eased = 1 - Math.pow(1 - progress, 3);
       setCount(Math.floor(eased * target));
       if (progress < 1) {
@@ -74,23 +73,23 @@ function StatCard({
   isVisible,
   index,
 }: (typeof STATS)[number] & { isVisible: boolean; index: number }) {
-  const count = useCountUp(value, 2000 + index * 200, isVisible);
+  const count = useCountUp(value, 1800 + index * 150, isVisible);
 
   return (
     <div
-      className="text-center p-8 rounded-2xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.04] hover:border-white/[0.1] transition-all duration-500 group"
+      className="text-center p-6 rounded-[4px] bg-[#f8fafc] border border-[#d0d4db] hover:border-[#0078d4] hover:bg-white hover:shadow-sm transition-all duration-200"
       style={{
         opacity: isVisible ? 1 : 0,
-        transform: isVisible ? "translateY(0)" : "translateY(24px)",
-        transition: `opacity 0.7s ease ${index * 0.15}s, transform 0.7s ease ${index * 0.15}s, background 0.3s, border 0.3s`,
+        transform: isVisible ? "translateY(0)" : "translateY(16px)",
+        transition: `opacity 0.5s ease ${index * 0.1}s, transform 0.5s ease ${index * 0.1}s, background-color 0.15s, border-color 0.15s`,
       }}
     >
-      <div className={`text-4xl sm:text-5xl font-black ${color} mb-2 group-hover:scale-110 transition-transform duration-300 inline-block`}>
+      <div className={`text-3xl sm:text-4xl font-bold ${color} mb-1 tracking-tight`}>
         {count.toLocaleString()}
-        <span className="text-2xl sm:text-3xl">{suffix}</span>
+        <span className="text-xl sm:text-2xl ml-0.5">{suffix}</span>
       </div>
-      <div className="text-base font-bold text-white mb-1">{label}</div>
-      <div className="text-sm text-neutral-500">{description}</div>
+      <div className="text-sm font-semibold text-[#201f1e] mb-1">{label}</div>
+      <div className="text-xs text-[#605e5c]">{description}</div>
     </div>
   );
 }
@@ -109,30 +108,28 @@ export function StatsSection() {
           observer.disconnect();
         }
       },
-      { threshold: 0.2 }
+      { threshold: 0.15 }
     );
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
   return (
-    <section className="relative py-24 lg:py-32 bg-[#06060e]">
-      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-      <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 60% 40% at 50% 50%, rgba(99,102,241,0.06) 0%, transparent 70%)" }} />
-
+    <section
+      className="relative py-16 sm:py-20 bg-white border-b border-[#e1dfdd]"
+      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+    >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            Trusted by{" "}
-            <span className="bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
-              Students Everywhere
-            </span>
+        <div className="text-center mb-12">
+          <h2 className="text-2xl sm:text-3xl font-bold text-[#201f1e] tracking-tight">
+            Trusted by <span className="text-[#0078d4]">Students Everywhere</span>
           </h2>
-          <p className="mt-3 text-neutral-500">Real numbers from real students using Neuron OS every day.</p>
+          <p className="mt-2 text-sm text-[#605e5c]">
+            Real numbers from real students using Neuron OS every day.
+          </p>
         </div>
 
-        <div ref={sectionRef} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div ref={sectionRef} className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
           {STATS.map((stat, index) => (
             <StatCard key={stat.label} {...stat} isVisible={isVisible} index={index} />
           ))}

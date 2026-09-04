@@ -9,11 +9,6 @@ const STEPS = [
     icon: Upload,
     title: "Upload Any Lecture",
     subtitle: "PDF, DOCX, PPTX — anything",
-    color: "violet",
-    accentColor: "from-violet-600 to-violet-400",
-    borderColor: "border-violet-500/30",
-    bgColor: "bg-violet-500/10",
-    textColor: "text-violet-400",
     preview: {
       type: "upload",
     },
@@ -23,11 +18,6 @@ const STEPS = [
     icon: Sparkles,
     title: "AI Generates Summary",
     subtitle: "Structured, concise, instant",
-    color: "indigo",
-    accentColor: "from-indigo-600 to-indigo-400",
-    borderColor: "border-indigo-500/30",
-    bgColor: "bg-indigo-500/10",
-    textColor: "text-indigo-400",
     preview: {
       type: "summary",
     },
@@ -37,11 +27,6 @@ const STEPS = [
     icon: HelpCircle,
     title: "AI Creates Quizzes",
     subtitle: "MCQs, short answers, and more",
-    color: "cyan",
-    accentColor: "from-cyan-600 to-cyan-400",
-    borderColor: "border-cyan-500/30",
-    bgColor: "bg-cyan-500/10",
-    textColor: "text-cyan-400",
     preview: {
       type: "quiz",
     },
@@ -51,11 +36,6 @@ const STEPS = [
     icon: Calendar,
     title: "Extracts Deadlines",
     subtitle: "Sets smart reminder schedules",
-    color: "amber",
-    accentColor: "from-amber-600 to-amber-400",
-    borderColor: "border-amber-500/30",
-    bgColor: "bg-amber-500/10",
-    textColor: "text-amber-400",
     preview: {
       type: "deadlines",
     },
@@ -64,29 +44,32 @@ const STEPS = [
 
 function UploadPreview() {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.04] border border-white/[0.06]">
-        <div className="h-10 w-10 rounded-lg bg-red-500/20 flex items-center justify-center">
-          <span className="text-xs font-black text-red-400">PDF</span>
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 p-3 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db]">
+        <div className="h-9 w-9 rounded-[3px] bg-[#fde7e9] border border-[#f8a5ab] flex items-center justify-center">
+          <span className="text-[10px] font-bold text-[#a4262c]">PDF</span>
         </div>
-        <div className="flex-1 space-y-1">
-          <div className="text-sm font-semibold text-white">OS_Lecture_07.pdf</div>
-          <div className="text-xs text-neutral-500">2.4 MB · Operating Systems</div>
+        <div className="flex-1 space-y-0.5">
+          <div className="text-xs font-semibold text-[#201f1e]">OS_Lecture_07.pdf</div>
+          <div className="text-[11px] text-[#605e5c]">2.4 MB · Operating Systems</div>
         </div>
-        <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="h-2 w-2 rounded-full bg-[#107c41]" />
       </div>
-      <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.04] border border-white/[0.06]">
-        <div className="h-10 w-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-          <span className="text-xs font-black text-blue-400">DOC</span>
+
+      <div className="flex items-center gap-3 p-3 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db]">
+        <div className="h-9 w-9 rounded-[3px] bg-[#e5f1fb] border border-[#99c8f5] flex items-center justify-center">
+          <span className="text-[10px] font-bold text-[#0078d4]">DOC</span>
         </div>
-        <div className="flex-1 space-y-1">
-          <div className="text-sm font-semibold text-white">Database_Notes.docx</div>
-          <div className="text-xs text-neutral-500">1.1 MB · Database Systems</div>
+        <div className="flex-1 space-y-0.5">
+          <div className="text-xs font-semibold text-[#201f1e]">Database_Notes.docx</div>
+          <div className="text-[11px] text-[#605e5c]">1.1 MB · Database Systems</div>
         </div>
-        <Check className="h-4 w-4 text-emerald-400" />
+        <Check className="h-4 w-4 text-[#107c41]" />
       </div>
-      <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs text-violet-300">
-        ✓ AI is processing your upload...
+
+      <div className="p-3 rounded-[3px] bg-[#f0f6ff] border border-[#c7e0f4] text-xs text-[#004578] font-medium flex items-center gap-2">
+        <span className="text-[#107c41] font-bold">✓</span>
+        <span>AI is processing your upload...</span>
       </div>
     </div>
   );
@@ -94,23 +77,25 @@ function UploadPreview() {
 
 function SummaryPreview() {
   return (
-    <div className="space-y-3">
-      <div className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-2">AI Summary</div>
+    <div className="space-y-2.5">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-[#0078d4] mb-1">
+        AI Generated Summary
+      </div>
       <div className="space-y-2">
         {[
           "Process Scheduling: CPU scheduling algorithms include FCFS, SJF, Round Robin, and Priority Scheduling.",
           "Memory Management: Virtual memory uses paging and segmentation to provide process isolation.",
           "Deadlock Prevention: Four conditions must hold simultaneously for deadlock to occur.",
         ].map((text, i) => (
-          <div key={i} className="flex gap-2 p-2.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
-            <span className="text-indigo-400 font-bold text-xs mt-0.5">→</span>
-            <p className="text-xs text-neutral-300 leading-relaxed">{text}</p>
+          <div key={i} className="flex gap-2.5 p-2.5 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db]">
+            <span className="text-[#0078d4] font-bold text-xs mt-0.5">→</span>
+            <p className="text-xs text-[#323130] leading-relaxed">{text}</p>
           </div>
         ))}
       </div>
-      <div className="flex items-center gap-2 text-xs text-neutral-500">
-        <Sparkles className="h-3 w-3 text-indigo-400" />
-        Generated in 1.8 seconds
+      <div className="flex items-center gap-1.5 text-xs text-[#605e5c] pt-1">
+        <Sparkles className="h-3 w-3 text-[#0078d4]" />
+        <span>Generated in 1.8 seconds</span>
       </div>
     </div>
   );
@@ -119,25 +104,30 @@ function SummaryPreview() {
 function QuizPreview() {
   const [selected, setSelected] = useState<number | null>(null);
   return (
-    <div className="space-y-3">
-      <div className="text-xs font-bold uppercase tracking-wider text-cyan-400">Quiz Question 1/5</div>
-      <p className="text-sm text-white font-medium">Which scheduling algorithm can lead to starvation?</p>
+    <div className="space-y-2.5">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-[#0078d4]">
+        Quiz Question 1/5
+      </div>
+      <p className="text-xs sm:text-sm text-[#201f1e] font-semibold">
+        Which scheduling algorithm can lead to starvation?
+      </p>
       <div className="space-y-2">
         {["Round Robin", "Priority Scheduling", "FCFS", "Multilevel Queue"].map((opt, i) => (
           <button
             key={opt}
             onClick={() => setSelected(i)}
-            className={`w-full text-left px-3 py-2 rounded-lg text-xs border transition-all duration-200 ${
+            type="button"
+            className={`w-full text-left px-3 py-2 rounded-[3px] text-xs border transition-colors ${
               selected === i
                 ? i === 1
-                  ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
-                  : "bg-red-500/20 border-red-500/50 text-red-300"
-                : "bg-white/[0.03] border-white/[0.06] text-neutral-300 hover:bg-white/[0.06]"
+                  ? "bg-[#dff6dd] border-[#107c41] text-[#107c41] font-semibold"
+                  : "bg-[#fde7e9] border-[#a4262c] text-[#a4262c] font-semibold"
+                : "bg-[#f8fafc] border-[#d0d4db] text-[#323130] hover:bg-[#f3f2f1]"
             }`}
           >
             <span className="font-bold mr-2">{["A", "B", "C", "D"][i]}.</span>
             {opt}
-            {selected !== null && i === 1 && <Check className="inline h-3 w-3 ml-2 text-emerald-400" />}
+            {selected !== null && i === 1 && <Check className="inline h-3 w-3 ml-2 text-[#107c41]" />}
           </button>
         ))}
       </div>
@@ -147,27 +137,29 @@ function QuizPreview() {
 
 function DeadlinesPreview() {
   return (
-    <div className="space-y-3">
-      <div className="text-xs font-bold uppercase tracking-wider text-amber-400">Extracted Deadlines</div>
+    <div className="space-y-2.5">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-[#0078d4]">
+        Extracted Deadlines
+      </div>
       {[
-        { task: "OS Assignment 2", date: "May 28", days: 4, col: "red" },
-        { task: "DB Lab Report", date: "June 2", days: 9, col: "amber" },
-        { task: "Mid-Term Exam", date: "June 10", days: 17, col: "emerald" },
+        { task: "OS Assignment 2", date: "May 28", days: 4, col: "text-[#a4262c] bg-[#fde7e9] border-[#f8a5ab]" },
+        { task: "DB Lab Report", date: "June 2", days: 9, col: "text-[#ca5010] bg-[#fff4ce] border-[#fce196]" },
+        { task: "Mid-Term Exam", date: "June 10", days: 17, col: "text-[#107c41] bg-[#dff6dd] border-[#b0e6b5]" },
       ].map(({ task, date, days, col }) => (
-        <div key={task} className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/[0.05]">
-          <div className={`h-2 w-2 rounded-full bg-${col}-400 animate-pulse`} />
+        <div key={task} className="flex items-center gap-3 p-2.5 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db]">
+          <div className="h-2 w-2 rounded-full bg-[#0078d4]" />
           <div className="flex-1">
-            <div className="text-xs font-semibold text-white">{task}</div>
-            <div className="text-[11px] text-neutral-500">{date} · {days} days left</div>
+            <div className="text-xs font-semibold text-[#201f1e]">{task}</div>
+            <div className="text-[11px] text-[#605e5c]">{date} · {days} days left</div>
           </div>
-          <div className={`text-[10px] font-bold text-${col}-400 px-2 py-1 rounded-md bg-${col}-500/10`}>
+          <div className={`text-[10.5px] font-bold px-2 py-0.5 rounded-[2px] border ${col}`}>
             {days}d
           </div>
         </div>
       ))}
-      <div className="text-xs text-neutral-500 flex items-center gap-1.5">
-        <Calendar className="h-3 w-3 text-amber-400" />
-        Reminders automatically scheduled
+      <div className="text-xs text-[#605e5c] flex items-center gap-1.5 pt-1">
+        <Calendar className="h-3 w-3 text-[#0078d4]" />
+        <span>Reminders automatically scheduled</span>
       </div>
     </div>
   );
@@ -188,7 +180,7 @@ export function AIShowcaseSection() {
   useEffect(() => {
     const interval = setInterval(() => {
       setActiveStep((prev) => (prev + 1) % STEPS.length);
-    }, 4000);
+    }, 4500);
     return () => clearInterval(interval);
   }, []);
 
@@ -196,7 +188,7 @@ export function AIShowcaseSection() {
     const el = sectionRef.current;
     if (!el) return;
     el.style.opacity = "0";
-    el.style.transform = "translateY(32px)";
+    el.style.transform = "translateY(20px)";
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -214,13 +206,13 @@ export function AIShowcaseSection() {
   useEffect(() => {
     if (previewRef.current) {
       previewRef.current.style.opacity = "0";
-      previewRef.current.style.transform = "scale(0.97)";
+      previewRef.current.style.transform = "scale(0.99)";
       const t = setTimeout(() => {
         if (previewRef.current) {
           previewRef.current.style.opacity = "1";
           previewRef.current.style.transform = "scale(1)";
         }
-      }, 80);
+      }, 70);
       return () => clearTimeout(t);
     }
   }, [activeStep]);
@@ -231,31 +223,24 @@ export function AIShowcaseSection() {
   return (
     <section
       id="ai-showcase"
-      className="relative py-24 lg:py-32 bg-[#06060e]"
+      className="relative py-20 lg:py-28 bg-white border-b border-[#e1dfdd]"
+      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
     >
-      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-      <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 80% 50% at 50% 50%, rgba(139,92,246,0.05) 0%, transparent 70%)" }} />
-
       <div
         ref={sectionRef}
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-        style={{ transition: "opacity 0.8s ease, transform 0.8s ease" }}
+        style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
       >
         {/* Header */}
-        <div className="text-center mb-16 space-y-4">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-violet-500/20 mb-2">
-            <Sparkles className="h-3.5 w-3.5 text-violet-400 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-widest text-violet-400">AI In Action</span>
+        <div className="text-center mb-14 space-y-3">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db] shadow-xs">
+            <Sparkles className="h-3.5 w-3.5 text-[#0078d4]" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0078d4]">AI In Action</span>
           </div>
-          <h2 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight">
-            See the{" "}
-            <span className="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">
-              Intelligence
-            </span>{" "}
-            Work
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#201f1e] tracking-tight">
+            See the <span className="text-[#0078d4]">Intelligence</span> Work
           </h2>
-          <p className="text-lg text-neutral-400 max-w-2xl mx-auto">
+          <p className="text-sm sm:text-base text-[#475569] max-w-2xl mx-auto">
             Watch how Neuron OS transforms raw lecture files into an organized, interactive study system.
           </p>
         </div>
@@ -263,7 +248,7 @@ export function AIShowcaseSection() {
         {/* Main showcase */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
           {/* Step selector */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {STEPS.map((s, i) => {
               const Icon = s.icon;
               const isActive = i === activeStep;
@@ -271,33 +256,40 @@ export function AIShowcaseSection() {
                 <button
                   key={s.id}
                   onClick={() => setActiveStep(i)}
-                  className={`w-full text-left p-5 rounded-2xl border transition-all duration-400 ${
+                  type="button"
+                  className={`w-full text-left p-4 rounded-[4px] border transition-all duration-150 ${
                     isActive
-                      ? `bg-gradient-to-br ${s.accentColor.replace("from-", "from-").replace(" to-", " to-")}/10 ${s.borderColor} shadow-lg`
-                      : "bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.04]"
+                      ? "bg-[#e5f1fb] border-[#0078d4] shadow-xs"
+                      : "bg-[#f8fafc] border-[#d0d4db] hover:bg-[#f3f2f1] hover:border-[#b3d6fc]"
                   }`}
                 >
-                  <div className="flex items-center gap-4">
-                    <div className={`h-10 w-10 rounded-xl flex items-center justify-center transition-all duration-300 ${isActive ? s.bgColor : "bg-white/[0.04]"}`}>
-                      <Icon className={`h-5 w-5 transition-colors duration-300 ${isActive ? s.textColor : "text-neutral-500"}`} />
+                  <div className="flex items-center gap-3.5">
+                    <div
+                      className={`h-9 w-9 rounded-[3px] flex items-center justify-center transition-colors ${
+                        isActive ? "bg-[#0078d4] text-white" : "bg-white border border-[#d0d4db] text-[#605e5c]"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
                     </div>
                     <div className="flex-1">
-                      <div className={`text-sm font-bold transition-colors duration-300 ${isActive ? "text-white" : "text-neutral-400"}`}>
+                      <div className={`text-sm font-semibold ${isActive ? "text-[#004578]" : "text-[#201f1e]"}`}>
                         {s.title}
                       </div>
-                      <div className={`text-xs transition-colors duration-300 ${isActive ? "text-neutral-400" : "text-neutral-600"}`}>
+                      <div className={`text-xs ${isActive ? "text-[#0078d4]" : "text-[#605e5c]"}`}>
                         {s.subtitle}
                       </div>
                     </div>
-                    <ChevronRight className={`h-4 w-4 transition-all duration-300 ${isActive ? `${s.textColor} translate-x-0.5` : "text-neutral-700"}`} />
+                    <ChevronRight
+                      className={`h-4 w-4 ${isActive ? "text-[#0078d4] translate-x-0.5" : "text-[#a19f9d]"}`}
+                    />
                   </div>
 
                   {/* Progress bar for active */}
                   {isActive && (
-                    <div className="mt-3 h-0.5 rounded-full bg-white/10 overflow-hidden">
+                    <div className="mt-2.5 h-1 rounded-full bg-[#c7e0f4] overflow-hidden">
                       <div
-                        className={`h-full rounded-full bg-gradient-to-r ${s.accentColor}`}
-                        style={{ animation: "progressBar 4s linear forwards" }}
+                        className="h-full rounded-full bg-[#0078d4]"
+                        style={{ animation: "showcaseProgress 4.5s linear forwards" }}
                       />
                     </div>
                   )}
@@ -307,34 +299,39 @@ export function AIShowcaseSection() {
           </div>
 
           {/* Preview panel */}
-          <div className="lg:sticky lg:top-24">
-            <div className="rounded-2xl border border-white/[0.08] bg-[#0d0d1a] overflow-hidden shadow-2xl shadow-black/50">
+          <div className="lg:sticky lg:top-20">
+            <div className="rounded-[6px] border border-[#d0d4db] bg-white overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
               {/* Window bar */}
-              <div className="flex items-center gap-2 px-4 py-3 bg-[#0a0a12] border-b border-white/[0.05]">
-                <div className="flex gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-red-500/60" />
-                  <span className="h-2.5 w-2.5 rounded-full bg-yellow-500/60" />
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/60" />
+              <div className="flex items-center justify-between px-3.5 py-2 bg-[#f3f4f6] border-b border-[#e1dfdd]">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#e81123]/70" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#ffb900]/70" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#107c41]/70" />
+                  </div>
+                  <span className="text-[11px] font-medium text-[#605e5c] ml-2">Neuron OS — Live Preview</span>
                 </div>
-                <div className="flex-1 text-center text-[11px] text-neutral-600">Neuron OS — AI Engine</div>
+                <span className="text-[10px] text-[#8a8886] font-mono">v1.0.4</span>
               </div>
               <div
                 ref={previewRef}
-                className="p-6 min-h-[300px]"
-                style={{ transition: "opacity 0.3s ease, transform 0.3s ease" }}
+                className="p-5 min-h-[280px]"
+                style={{ transition: "opacity 0.2s ease, transform 0.2s ease" }}
               >
                 <PreviewComp />
               </div>
             </div>
 
             {/* Step indicator dots */}
-            <div className="flex items-center justify-center gap-2 mt-4">
+            <div className="flex items-center justify-center gap-1.5 mt-3.5">
               {STEPS.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setActiveStep(i)}
-                  className={`rounded-full transition-all duration-300 ${
-                    i === activeStep ? "w-6 h-2 bg-violet-500" : "w-2 h-2 bg-white/20 hover:bg-white/30"
+                  type="button"
+                  aria-label={`Step ${i + 1}`}
+                  className={`rounded-full transition-all duration-200 ${
+                    i === activeStep ? "w-5 h-1.5 bg-[#0078d4]" : "w-1.5 h-1.5 bg-[#d0d4db] hover:bg-[#a19f9d]"
                   }`}
                 />
               ))}
@@ -344,7 +341,7 @@ export function AIShowcaseSection() {
       </div>
 
       <style>{`
-        @keyframes progressBar {
+        @keyframes showcaseProgress {
           from { width: 0%; }
           to { width: 100%; }
         }

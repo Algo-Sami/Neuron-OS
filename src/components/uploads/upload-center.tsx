@@ -51,6 +51,7 @@ import {
   getSummaryFileLocationAction,
   rejectOrCustomizeClassification,
 } from "@/actions/uploads";
+import { getSubjectFolders } from "@/actions/folders";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -399,12 +400,55 @@ function UploadArea({
   onUploadComplete: () => void;
   dropZoneRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const [queue, setQueue] = useState<UploadQueueItem[]>([]);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(subjects[0]?.id || "");
+  const [selectedFolderId, setSelectedFolderId] = useState<string>("");
+  const [availableFolders, setAvailableFolders] = useState<{ id: string; name: string }[]>([]);
+  const [loadingFolders, setLoadingFolders] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const settings = useSettingsStore();
+
+  // Sync selectedSubjectId when subjects load
+  useEffect(() => {
+    if (!selectedSubjectId && subjects.length > 0) {
+      setSelectedSubjectId(subjects[0].id);
+    }
+  }, [subjects, selectedSubjectId]);
+
+  // Load available destination folders when selectedSubjectId changes
+  useEffect(() => {
+    if (!selectedSubjectId) {
+      setAvailableFolders([]);
+      setSelectedFolderId("");
+      return;
+    }
+    let isMounted = true;
+    setLoadingFolders(true);
+    getSubjectFolders(selectedSubjectId)
+      .then((folders) => {
+        if (!isMounted) return;
+        // Filter out "AI Generated" because it is a system-managed output directory
+        const valid = (folders || []).filter(
+          (f) => f.name.trim().toLowerCase() !== "ai generated"
+        );
+        setAvailableFolders(valid);
+        const lectureFolder = valid.find((f) => /lecture/i.test(f.name));
+        setSelectedFolderId(lectureFolder?.id || valid[0]?.id || "");
+      })
+      .catch((err) => {
+        console.warn("Failed to load subject folders:", err);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingFolders(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedSubjectId]);
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingDoc, setPendingDoc] = useState<{
@@ -613,6 +657,7 @@ function UploadArea({
           const dupCheck = await checkDuplicateUploadAction({
             fileName: item.name,
             subjectId: selectedSubjectId || undefined,
+            folderId: selectedFolderId || undefined,
           });
 
           if (dupCheck.success && dupCheck.isDuplicate) {
@@ -680,13 +725,14 @@ function UploadArea({
           data: { publicUrl },
         } = supabase.storage.from("documents").getPublicUrl(filePath);
 
-        // Save metadata & classify
+        // Save metadata & destination
         const result = await saveUploadMetadata({
           fileName: item.name,
           fileUrl: publicUrl,
           fileType: item.type,
           fileSize: item.size,
           subjectId: selectedSubjectId || undefined,
+          folderId: selectedFolderId || undefined,
         });
 
         if (!result.success) {
@@ -746,35 +792,6 @@ function UploadArea({
               : q
           )
         );
-
-        // AI study pack dispatch check
-        const classification = classifyFile(item.name);
-        const fireStudyPack = async () => {
-          try {
-            await fetch("/api/generate-study-pack", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              keepalive: true,
-              body: JSON.stringify({
-                documentId: result.documentId,
-                fileUrl: publicUrl,
-                fileType: item.type,
-              }),
-            });
-          } catch (err) {
-            console.warn("Failed to fire study pack generation", err);
-          }
-        };
-
-        // AI study pack dispatch check — ONLY for lecture files when subject is assigned
-        const hasValidSubject = !!result.subjectId && result.classificationStatus !== 'needs_review';
-        const isLectureFolder =
-          /lecture/i.test(destinationFolder || "") ||
-          /lecture/i.test(classification.label || "");
-
-        if (hasValidSubject && isLectureFolder && settings.aiAutoLectures !== false) {
-          fireStudyPack();
-        }
 
         onUploadComplete();
       } catch (err: unknown) {
@@ -867,30 +884,76 @@ function UploadArea({
       </div>
 
       <div className="p-5 flex flex-col gap-4">
-        {/* Optional Subject Assignment */}
-        {subjects.length > 0 && (
-          <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-muted/30 border border-border/40 text-xs">
+        {/* Explicit Subject & Folder Destination Selection */}
+        {subjects.length > 0 ? (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/50 text-xs">
             <div className="flex items-center gap-2 text-muted-foreground min-w-0">
-              <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span className="font-medium text-foreground">Destination:</span>
-              <span className="truncate text-muted-foreground">
-                {selectedSubjectId
-                  ? subjects.find((s) => s.id === selectedSubjectId)?.name
-                  : "Automatic intelligent routing"}
-              </span>
+              <FolderOpen className="h-4 w-4 text-primary shrink-0" />
+              <span className="font-semibold text-foreground">Upload Destination:</span>
             </div>
-            <select
-              value={selectedSubjectId}
-              onChange={(e) => setSelectedSubjectId(e.target.value)}
-              className="rounded-md border border-border/60 bg-background text-foreground text-xs px-2.5 py-1 outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer shrink-0 max-w-[200px]"
+            
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              {/* Subject Selector */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">Subject:</span>
+                <select
+                  value={selectedSubjectId}
+                  onChange={(e) => setSelectedSubjectId(e.target.value)}
+                  className="rounded-md border border-border/60 bg-background text-foreground text-xs px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer max-w-[180px]"
+                >
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.code ? `(${s.code})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Folder Selector */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">Folder:</span>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={selectedFolderId}
+                    onChange={(e) => setSelectedFolderId(e.target.value)}
+                    className="rounded-md border border-border/60 bg-background text-foreground text-xs px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer max-w-[220px]"
+                  >
+                    {(availableFolders.length > 0
+                      ? availableFolders
+                      : [
+                          { id: "Lectures", name: "Lectures" },
+                          { id: "Assignments", name: "Assignments" },
+                        ]
+                    ).map((f) => {
+                      const isLecture = /lecture/i.test(f.name);
+                      return (
+                        <option key={f.id} value={f.id}>
+                          {f.name} {isLecture ? "⚡ (AI Summary)" : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {loadingFolders && (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3 p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+              <span>No subjects found. Please create a subject before uploading course materials.</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs border-amber-500/40 hover:bg-amber-500/20 shrink-0"
+              onClick={() => router.push("/subjects")}
             >
-              <option value="">Auto-classify (Recommended)</option>
-              {subjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} {s.code ? `(${s.code})` : ""}
-                </option>
-              ))}
-            </select>
+              + Create Subject
+            </Button>
           </div>
         )}
 

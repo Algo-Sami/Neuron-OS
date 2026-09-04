@@ -178,7 +178,8 @@ export async function signOutUser() {
  */
 export async function quickSignUp(
   email: string,
-  password: string
+  password: string,
+  metadata?: { firstName?: string; lastName?: string; fullName?: string }
 ): Promise<{ success: boolean; requiresConfirmation?: boolean; error?: string }> {
   if (!email || !password) {
     return { success: false, error: "Email and password are required." };
@@ -189,7 +190,21 @@ export async function quickSignUp(
 
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: metadata
+        ? {
+            data: {
+              first_name: metadata.firstName,
+              last_name: metadata.lastName,
+              full_name:
+                metadata.fullName ||
+                `${metadata.firstName || ""} ${metadata.lastName || ""}`.trim(),
+            },
+          }
+        : undefined,
+    });
 
     if (error) {
       return { success: false, error: error.message };

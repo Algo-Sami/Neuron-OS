@@ -27,17 +27,27 @@ export async function createSubject(name: string, code: string, color: string) {
   }
   // ────────────────────────────────────────────────────────────────────────
 
-  const { error } = await supabase
+  const { data: newSubject, error } = await supabase
     .from("subjects")
     .insert({
       user_id: user.id,
       name: trimmedName,
       code,
       color,
-    });
+    })
+    .select("id")
+    .single();
 
-  if (error) {
-    throw new Error(error.message || "Failed to create subject");
+  if (error || !newSubject) {
+    throw new Error(error?.message || "Failed to create subject");
+  }
+
+  // Automatically scaffold standard folders: Lectures, Assignments, AI Generated
+  try {
+    const { scaffoldSubjectFoldersAction } = await import("@/actions/folders");
+    await scaffoldSubjectFoldersAction(newSubject.id);
+  } catch (scaffoldErr) {
+    console.warn("[createSubject] Scaffold warning:", scaffoldErr);
   }
 
   revalidatePath("/subjects");

@@ -116,42 +116,44 @@ export async function saveUploadMetadata({
     };
   }
 
-  // 2. Classify against user's actual subjects using the 8-layer classification pipeline
-  const classification = await SubjectClassifier.classify(
-    {
-      userId: user.id,
-      filename: fileName,
-      subjectId,
-      folderId,
-      currentSubjectId,
-    },
-    { supabase }
-  );
+  // 2. Resolve destination Subject & Folder (Explicit selection takes priority)
+  let resolvedSubjectId: string | null = subjectId || currentSubjectId || null;
+  let resolvedFolderId: string | null = folderId || null;
+  let classificationStatus: 'auto_applied' | 'needs_review' = resolvedSubjectId ? 'auto_applied' : 'needs_review';
 
-  const resolvedSubjectId: string | null = classification.subjectId;
-  let resolvedFolderId: string | null = null;
+  // Fallback to classifier only if no explicit subject was provided
+  const classification = resolvedSubjectId
+    ? {
+        subjectId: resolvedSubjectId,
+        folderName: null,
+        confidence: 1.0,
+        method: 'explicit_selection',
+        reason: 'User selected subject directly',
+        subjectName: null,
+        labSubfolderName: null,
+      }
+    : await SubjectClassifier.classify(
+        {
+          userId: user.id,
+          filename: fileName,
+          subjectId,
+          folderId,
+          currentSubjectId,
+        },
+        { supabase }
+      );
 
-  // A classification is high confidence when:
-  // 1. The confidence score is >= 0.90 from any layer
-  // 2. The user explicitly passed a subjectId (Layer 1 explicit selection)
-  // 3. The upload was initiated within a subject folder context (currentSubjectId passed, Layer 2)
-  // 4. The classifier used Layer 1 (explicit_selection) or Layer 2 (folder_context) —
-  //    these are always authoritative regardless of confidence score
-  const isExplicitContext = !!subjectId || !!currentSubjectId;
-  const isAuthorativeMethod = classification.method === 'explicit_selection' || classification.method === 'folder_context';
-  const isHighConfidence = classification.confidence >= 0.90 || isExplicitContext || isAuthorativeMethod;
-  const classificationStatus: 'auto_applied' | 'needs_review' = isHighConfidence
-    ? 'auto_applied'
-    : 'needs_review';
+  if (!resolvedSubjectId && classification.subjectId) {
+    resolvedSubjectId = classification.subjectId;
+    classificationStatus = classification.confidence >= 0.90 ? 'auto_applied' : 'needs_review';
+  }
 
-
-  // 3. Resolve Folder (with parent-child nesting for Lab materials) if subject is confidently identified
+  // 3. Resolve Folder if subject is identified
   if (resolvedSubjectId) {
-    if (folderId) {
-      // User explicitly uploaded inside a specific folder context
-      resolvedFolderId = folderId;
+    if (resolvedFolderId) {
+      // User explicitly selected destination folder
     } else {
-      let targetFolderName = classification.folderName;
+      let targetFolderName = classification.folderName || 'Lectures';
 
       // If classification did not find an explicit keyword folder (e.g. for receipts, generic documents),
       // check if a base version of this file was previously organized in a specific folder in this subject
@@ -430,7 +432,7 @@ export async function saveUploadMetadata({
   // 7. Automatically dispatch background study pack generation to BullMQ queue.
   //    Only dispatched when the document is assigned to a "Lectures" folder.
   //    Assignments, Quizzes, Lab, and unclassified documents do NOT trigger AI pipeline.
-  const targetFolder = classification.folderName || 'Lectures';
+  const targetFolder = resolvedFolderName || classification.folderName || 'Lectures';
   const isLectureFolder = /lecture/i.test(targetFolder);
 
   if (resolvedSubjectId && isLectureFolder) {

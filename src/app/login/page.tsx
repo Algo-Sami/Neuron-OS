@@ -1,136 +1,206 @@
+import Image from "next/image";
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BrainCircuit, Sparkles, BookOpen, Clock, Zap, Target } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { AuthCard } from "@/components/auth/auth-card";
 
 export const metadata = {
-  title: "Authenticate Workspace - Neuron OS",
-  description: "Sign in or create a custom student account to access your AI academic second brain and track study streaking progress.",
+  title: "Sign In — Neuron OS",
+  description: "Sign in to your Neuron OS academic workspace.",
 };
 
 export default async function LoginPage() {
-
-  // 1. Safe Redirect: If the user is already authenticated, send them straight to the dashboard!
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-
-  if (user) {
-    redirect("/dashboard");
-  }
+  if (user) redirect("/dashboard");
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col lg:flex-row overflow-hidden bg-[#020817] select-none">
+    <div
+      className="min-h-screen w-full flex items-center justify-center select-none"
+      style={{
+        background: "#eef0f4",
+        fontFamily: '"Segoe UI Variable", "Segoe UI", Inter, system-ui, sans-serif',
+      }}
+    >
+      {/* ── Main card ─────────────────────────────────────────────────── */}
+      <div
+        className="w-full max-w-[960px] flex flex-col lg:flex-row overflow-hidden m-2 sm:m-4 lg:m-0 rounded-lg lg:min-h-[600px]"
+        style={{
+          boxShadow: "0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)",
+          border: "1px solid #d0d4db",
+        }}
+      >
+        {/* ══ LEFT PANEL — Academic AI image (Desktop only) ════════════ */}
+        <div className="hidden lg:block relative lg:w-[44%] flex-shrink-0 overflow-hidden">
+          <Image
+            src="/ai-education.jpg"
+            alt="AI-powered academic education — Neuron OS"
+            fill
+            sizes="(max-width: 1024px) 100vw, 44vw"
+            className="object-cover"
+            priority
+          />
 
-      {/* ── LEFT PANEL ────────────────────────────────────────────────────── */}
-      <div className="relative hidden lg:flex lg:w-1/2 flex-col justify-between p-12 text-white overflow-hidden border-r border-[#334155]/60 bg-[#0F172A]">
-
-        {/* Ambient glow */}
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 10% 20%, rgba(56,189,248,0.05) 0%, transparent 55%)" }} />
-
-        {/* Top brand logo */}
-        <div className="flex items-center gap-2.5 relative z-10">
+          {/* Overlay — subtle gradient for text readability */}
           <div
-            className="flex h-8 w-8 items-center justify-center rounded-lg shadow-md"
-            style={{ background: "linear-gradient(135deg, #3b82f6, #38bdf8)", boxShadow: "0 4px 12px rgba(56,189,248,0.30)" }}
-          >
-            <BrainCircuit className="h-4.5 w-4.5 text-white animate-pulse" />
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-xs font-black tracking-widest uppercase text-[#F8FAFC]">NEURON OS</span>
-            <span className="text-[8px] font-bold uppercase tracking-widest text-[#38BDF8] leading-none mt-0.5">
-              Academic AI
-            </span>
-          </div>
-        </div>
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(to bottom, rgba(0,15,40,0.55) 0%, rgba(0,15,40,0.0) 40%, rgba(0,15,40,0.70) 100%)",
+            }}
+          />
 
-        {/* Dynamic features layout */}
-        <div className="my-auto space-y-8 relative z-10 max-w-md">
-          <div className="space-y-4">
-            <span className="inline-flex items-center gap-1.5 text-[9px] font-bold tracking-widest text-[#38BDF8] uppercase bg-[#38BDF8]/8 border border-[#38BDF8]/15 px-2.5 py-1 rounded-full">
-              <Sparkles className="h-3 w-3" /> System Activation
-            </span>
-            <h2 className="text-3xl font-bold tracking-tight text-[#F8FAFC] leading-tight">
-              An intelligent operating system for your academic brain.
-            </h2>
-            <p className="text-sm text-[#CBD5E1] leading-relaxed">
-              Upload your documents and lectures to generate structured flashcards, quizzes, and instant semantic summaries with a production-grade RAG engine.
+          {/* Top — institutional logo */}
+          <div className="absolute top-0 left-0 right-0 px-6 pt-6 z-10 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div
+                className="flex items-center justify-center"
+                style={{
+                  width: 32, height: 32,
+                  background: "rgba(255,255,255,0.12)",
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  borderRadius: 4,
+                }}
+              >
+                {/* Simple N icon */}
+                <span
+                  style={{
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    letterSpacing: 0,
+                    fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif',
+                  }}
+                >
+                  N
+                </span>
+              </div>
+              <div>
+                <div
+                  style={{
+                    color: "#fff",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif',
+                  }}
+                >
+                  Neuron OS
+                </div>
+                <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 9.5, letterSpacing: "0.03em" }}>
+                  Academic Intelligence Platform
+                </div>
+              </div>
+            </div>
+
+            <Link
+              href="/"
+              style={{
+                color: "rgba(255,255,255,0.85)",
+                fontSize: 11,
+                fontWeight: 400,
+                textDecoration: "none",
+                fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif',
+                background: "rgba(255,255,255,0.10)",
+                border: "1px solid rgba(255,255,255,0.22)",
+                padding: "4px 12px",
+                borderRadius: 4,
+                letterSpacing: "0.02em",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                transition: "background 0.15s ease",
+              }}
+            >
+              Back to website &rarr;
+            </Link>
+          </div>
+
+          {/* Bottom — institutional tagline */}
+          <div className="absolute bottom-0 left-0 right-0 px-6 pb-7 z-10">
+            <p
+              style={{
+                color: "#fff",
+                fontSize: 18,
+                fontWeight: 600,
+                lineHeight: 1.4,
+                fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif',
+                marginBottom: 6,
+              }}
+            >
+              Your Academic<br />Intelligence Workspace
             </p>
-          </div>
+            <p
+              style={{
+                color: "rgba(255,255,255,0.65)",
+                fontSize: 11.5,
+                lineHeight: 1.5,
+                fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif',
+              }}
+            >
+              AI-powered study tools for serious students
+            </p>
 
-          <div className="grid grid-cols-2 gap-3">
-            {/* Card 1 */}
-            <div className="p-4 rounded-xl border border-[rgba(148,163,184,0.15)] bg-[rgba(15,23,42,0.60)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(148,163,184,0.25)] hover:shadow-[0_12px_30px_rgba(0,0,0,0.25)]">
-              <BookOpen className="h-5 w-5 text-[#38BDF8] mb-2.5" />
-              <h4 className="text-sm font-semibold text-[#F1F5F9]">Syllabus Portals</h4>
-              <p className="text-xs text-[#94A3B8] mt-1 leading-relaxed">Automatic classification of topics, files, and lectures.</p>
-            </div>
-            {/* Card 2 */}
-            <div className="p-4 rounded-xl border border-[rgba(148,163,184,0.15)] bg-[rgba(15,23,42,0.60)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(148,163,184,0.25)] hover:shadow-[0_12px_30px_rgba(0,0,0,0.25)]">
-              <Clock className="h-5 w-5 text-[#38BDF8] mb-2.5" />
-              <h4 className="text-sm font-semibold text-[#F1F5F9]">Reminders &amp; Alerts</h4>
-              <p className="text-xs text-[#94A3B8] mt-1 leading-relaxed">Smart calendar generation to track assignments and quizzes.</p>
-            </div>
-            {/* Card 3 */}
-            <div className="p-4 rounded-xl border border-[rgba(148,163,184,0.15)] bg-[rgba(15,23,42,0.60)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(148,163,184,0.25)] hover:shadow-[0_12px_30px_rgba(0,0,0,0.25)]">
-              <Zap className="h-5 w-5 text-[#38BDF8] mb-2.5" />
-              <h4 className="text-sm font-semibold text-[#F1F5F9]">Active Recalls</h4>
-              <p className="text-xs text-[#94A3B8] mt-1 leading-relaxed">Adaptive revision feedback cycles to pinpoint weak topics.</p>
-            </div>
-            {/* Card 4 */}
-            <div className="p-4 rounded-xl border border-[rgba(148,163,184,0.15)] bg-[rgba(15,23,42,0.60)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(148,163,184,0.25)] hover:shadow-[0_12px_30px_rgba(0,0,0,0.25)]">
-              <Target className="h-5 w-5 text-[#38BDF8] mb-2.5" />
-              <h4 className="text-sm font-semibold text-[#F1F5F9]">Leaderboards</h4>
-              <p className="text-xs text-[#94A3B8] mt-1 leading-relaxed">Earn study streak points and progress to rank tiers.</p>
+            {/* Slide indicator */}
+            <div className="flex items-center gap-1.5 mt-4">
+              <span style={{ height: 2, width: 20, background: "rgba(255,255,255,0.35)", borderRadius: 2, display: "inline-block" }} />
+              <span style={{ height: 2, width: 20, background: "rgba(255,255,255,0.35)", borderRadius: 2, display: "inline-block" }} />
+              <span style={{ height: 2, width: 28, background: "#fff", borderRadius: 2, display: "inline-block" }} />
             </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="text-[10px] text-[#64748B] relative z-10 select-none">
-          © {new Date().getFullYear()} Neuron OS Inc. All rights reserved.
-        </div>
-      </div>
-
-      {/* ── RIGHT PANEL ───────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col justify-center items-center p-6 md:p-12 relative bg-[#020817]">
-
-        {/* Ambient glow */}
+        {/* ══ RIGHT PANEL — Auth form ═══════════════════════════════════ */}
         <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full pointer-events-none"
-          style={{ background: "radial-gradient(circle, rgba(56,189,248,0.04) 0%, transparent 70%)" }}
-        />
+          className="flex-1 flex flex-col justify-center items-center px-6 py-6 sm:px-10 lg:px-12 bg-white lg:border-l lg:border-[#d0d4db]"
+        >
+          {/* Mobile brand header (shown only when left panel is hidden) */}
+          <div className="flex items-center justify-between w-full max-w-[380px] mb-4 lg:hidden">
+            <div className="flex items-center gap-2">
+              <div
+                className="flex items-center justify-center rounded-[3px]"
+                style={{
+                  width: 26,
+                  height: 26,
+                  background: "#0078d4",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: 12,
+                }}
+              >
+                N
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.05em", color: "#201f1e" }}>
+                NEURON OS
+              </span>
+            </div>
+            <Link
+              href="/"
+              style={{
+                fontSize: 11,
+                color: "#0078d4",
+                textDecoration: "none",
+                fontWeight: 500,
+              }}
+            >
+              Back to website &rarr;
+            </Link>
+          </div>
 
-        {/* Mobile logo */}
-        <div className="flex items-center gap-2.5 mb-8 lg:hidden">
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-lg shadow-md"
-            style={{ background: "linear-gradient(135deg, #3b82f6, #38bdf8)", boxShadow: "0 4px 12px rgba(56,189,248,0.30)" }}
+          <AuthCard />
+
+          {/* Footer */}
+          <p
+            className="text-center mt-4 text-[10.5px] text-[#8a8f9a]"
+            style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
           >
-            <BrainCircuit className="h-4.5 w-4.5 text-white" />
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-xs font-black tracking-widest text-white">NEURON OS</span>
-            <span className="text-[8px] font-bold uppercase tracking-widest leading-none mt-0.5 text-[#38BDF8]">
-              Academic AI
-            </span>
-          </div>
+            By continuing, you agree to our{" "}
+            <a href="#" style={{ color: "#0078d4", textDecoration: "underline" }}>Terms of Service</a>
+            {" "}and{" "}
+            <a href="#" style={{ color: "#0078d4", textDecoration: "underline" }}>Privacy Policy</a>.
+          </p>
         </div>
-
-        {/* Auth card */}
-        <AuthCard />
-
-        {/* Terms footer */}
-        <p className="text-center text-[9px] mt-8 max-w-[280px] leading-relaxed text-[#64748B]">
-          By signing up, you agree to our{" "}
-          <a href="#" className="underline transition-colors hover:text-[#CBD5E1] text-[#94A3B8]">
-            Terms of Service
-          </a>
-          {" "}and{" "}
-          <a href="#" className="underline transition-colors hover:text-[#CBD5E1] text-[#94A3B8]">
-            Privacy Policy
-          </a>
-          .
-        </p>
       </div>
     </div>
   );

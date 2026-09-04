@@ -676,39 +676,54 @@ export class AIJobScheduler {
         }
       }
 
-      // ── 8. Summary Generation ──────────────────────────────────────────────
+      // ── 8. Concurrent AI Asset Generation (Summary + Key Points) ─────────────
       this.logDisk('summaryGen', `[StageResume] document=${this.documentId} resume_from=summaryGen`, 'INFO');
-      this.logDisk('summaryGen', 'Summary Generation Started', 'INFO');
+      this.logDisk('summaryGen', 'Concurrent AI Asset Generation Started (Summary + Key Points)', 'INFO');
       this.updateStage('summaryGen', { status: 'processing', startTime: new Date().toISOString() });
 
-      await this.saveProgress('Generating Summary');
+      await this.saveProgress('Generating Study Pack');
       await this.supabase.from('document_knowledge').update({
-        current_processing_stage: 'Generating Summary',
+        current_processing_stage: 'Generating Study Pack',
         updated_at: new Date().toISOString()
       }).eq('document_id', this.documentId);
 
-      const summaryStartMs = Date.now();
-      const summaryResult = await SummarySkillService.run({
-        documentId: this.documentId,
-        userId: this.userId,
-        mode: 'detailed',
-        forceRegenerate: !!this.options.forceRun,
-        supabase: this.supabase
-      });
-      const summaryDurationMs = Date.now() - summaryStartMs;
+      const aiGenStartMs = Date.now();
 
-      if (!summaryResult.success || !summaryResult.summary) {
-        const errMsg = summaryResult.errorMessage || 'Summary generation returned an empty result.';
-        const isRateLimited = summaryResult.errorCategory?.startsWith('rate_limit') || !!summaryResult.cooldownUntil;
-        const cooldownUntil = summaryResult.cooldownUntil || (isRateLimited ? new Date(Date.now() + 60000).toISOString() : null);
+      const [summarySettled, keyPointsSettled] = await Promise.allSettled([
+        SummarySkillService.run({
+          documentId: this.documentId,
+          userId: this.userId,
+          mode: 'detailed',
+          forceRegenerate: !!this.options.forceRun,
+          supabase: this.supabase
+        }),
+        KeyPointsSkillService.run({
+          documentId: this.documentId,
+          userId: this.userId,
+          forceRegenerate: !!this.options.forceRun,
+          supabase: this.supabase
+        })
+      ]);
+
+      const aiGenDurationMs = Date.now() - aiGenStartMs;
+      this.logDisk('summaryGen', `Concurrent AI generation finished in ${aiGenDurationMs}ms`, 'INFO');
+
+      const summaryResult = summarySettled.status === 'fulfilled' ? summarySettled.value : null;
+      const keyPointsResult = keyPointsSettled.status === 'fulfilled' ? keyPointsSettled.value : null;
+
+      // ── 8a. Validate and Persist Core Summary ──
+      if (!summaryResult || !summaryResult.success || !summaryResult.summary) {
+        const errMsg = summaryResult?.errorMessage || (summarySettled.status === 'rejected' ? summarySettled.reason?.message : 'Summary generation returned an empty result.');
+        const isRateLimited = summaryResult?.errorCategory?.startsWith('rate_limit') || !!summaryResult?.cooldownUntil;
+        const cooldownUntil = summaryResult?.cooldownUntil || (isRateLimited ? new Date(Date.now() + 60000).toISOString() : null);
 
         this.logDisk('summaryGen', isRateLimited ? 'Summary Generation Rate Limited' : 'Summary Generation Failed', isRateLimited ? 'WARN' : 'ERROR');
-        this.logDisk('summaryGen', `Failure Details — document: ${this.documentId}, user: ${this.userId}, stage: summaryGen, category: ${summaryResult.errorCategory || 'unknown'}, cooldown: ${cooldownUntil || 'none'}, reason: ${errMsg}`, isRateLimited ? 'WARN' : 'ERROR');
+        this.logDisk('summaryGen', `Failure Details — document: ${this.documentId}, user: ${this.userId}, stage: summaryGen, category: ${summaryResult?.errorCategory || 'unknown'}, cooldown: ${cooldownUntil || 'none'}, reason: ${errMsg}`, isRateLimited ? 'WARN' : 'ERROR');
         
         this.updateStage('summaryGen', {
-          status: isRateLimited ? 'failed' : 'failed',
+          status: 'failed',
           endTime: new Date().toISOString(),
-          durationMs: summaryDurationMs,
+          durationMs: aiGenDurationMs,
           errorMessage: errMsg
         });
 
@@ -722,8 +737,8 @@ export class AIJobScheduler {
         // Update documents table with persistent cooldown and normalized error category
         await this.supabase.from('documents').update({
           summary_status: isRateLimited ? 'rate_limited' : 'failed',
-          ai_error_category: summaryResult.errorCategory || (isRateLimited ? 'rate_limit_temporary' : 'unknown'),
-          ai_error_code: summaryResult.normalizedError?.providerCode || (isRateLimited ? 'RATE_LIMIT_EXCEEDED' : 'FAILED'),
+          ai_error_category: summaryResult?.errorCategory || (isRateLimited ? 'rate_limit_temporary' : 'unknown'),
+          ai_error_code: summaryResult?.normalizedError?.providerCode || (isRateLimited ? 'RATE_LIMIT_EXCEEDED' : 'FAILED'),
           ai_error_message: errMsg,
           ai_cooldown_until: cooldownUntil,
           ai_last_failed_at: new Date().toISOString(),
@@ -743,7 +758,7 @@ export class AIJobScheduler {
       this.updateStage('summaryGen', {
         status: 'completed',
         endTime: new Date().toISOString(),
-        durationMs: summaryDurationMs
+        durationMs: aiGenDurationMs
       });
 
       await this.supabase.from('document_knowledge').update({
@@ -761,52 +776,37 @@ export class AIJobScheduler {
         updated_at: new Date().toISOString()
       }).eq('id', this.documentId);
 
-      // ── 8b. Key Points Generation ───────────────────────────────────────────
-      this.logDisk('keyPointsGen', `[StageResume] document=${this.documentId} resume_from=keyPointsGen`, 'INFO');
-      this.logDisk('keyPointsGen', 'Key Points Generation Started', 'INFO');
-      const keyPointsStartMs = Date.now();
-      let keyPointsResult: any = null;
-      try {
-        keyPointsResult = await KeyPointsSkillService.run({
-          documentId: this.documentId,
-          userId: this.userId,
-          forceRegenerate: !!this.options.forceRun,
-          supabase: this.supabase
-        });
-
-        if (keyPointsResult && keyPointsResult.success) {
-          const kpDurationMs = Date.now() - keyPointsStartMs;
-          if (keyPointsResult.cached) {
-            this.logDisk('keyPointsGen', `[Idempotency] stage=keyPointsGen existing=true action=reuse`, 'INFO');
-          }
-          this.logDisk('keyPointsGen', `Key Points Generated Successfully in ${kpDurationMs}ms`, 'INFO');
-
-          // Save structured key-points.json in Supabase Storage for storage parity
-          try {
-            const kpJsonBuffer = Buffer.from(JSON.stringify({
-              lectureTitle: keyPointsResult.lectureTitle || docTitle,
-              keyPoints: keyPointsResult.keyPoints || [],
-              importantFacts: keyPointsResult.importantFacts || [],
-              quickRevisionTips: keyPointsResult.quickRevisionTips || []
-            }, null, 2));
-
-            const kpJsonPath = `${this.userId}/ai-gen-${this.documentId}/key-points.json`;
-            await this.supabase.storage.from('documents').upload(kpJsonPath, kpJsonBuffer, {
-              contentType: 'application/json',
-              cacheControl: '3600',
-              upsert: true
-            });
-          } catch (kpStoreErr: any) {
-            this.logDisk('keyPointsGen', `Saving key-points.json to storage warning: ${kpStoreErr?.message}`, 'WARN');
-          }
-        } else {
-          this.logDisk('keyPointsGen', `Key Points Generation bypassed/failed: ${keyPointsResult?.errorMessage}`, 'WARN');
+      // ── 8b. Process Key Points Result (Independent Asset Preservation) ──
+      if (keyPointsResult && keyPointsResult.success) {
+        if (keyPointsResult.cached) {
+          this.logDisk('keyPointsGen', `[Idempotency] stage=keyPointsGen existing=true action=reuse`, 'INFO');
         }
-      } catch (kpErr: any) {
-        this.logDisk('keyPointsGen', `Key Points Generation exception: ${kpErr?.message}`, 'WARN');
+        this.logDisk('keyPointsGen', `Key Points Generated Successfully`, 'INFO');
+
+        // Save structured key-points.json in Supabase Storage for storage parity
+        try {
+          const kpJsonBuffer = Buffer.from(JSON.stringify({
+            lectureTitle: keyPointsResult.lectureTitle || docTitle,
+            keyPoints: keyPointsResult.keyPoints || [],
+            importantFacts: keyPointsResult.importantFacts || [],
+            quickRevisionTips: keyPointsResult.quickRevisionTips || []
+          }, null, 2));
+
+          const kpJsonPath = `${this.userId}/ai-gen-${this.documentId}/key-points.json`;
+          await this.supabase.storage.from('documents').upload(kpJsonPath, kpJsonBuffer, {
+            contentType: 'application/json',
+            cacheControl: '3600',
+            upsert: true
+          });
+        } catch (kpStoreErr: any) {
+          this.logDisk('keyPointsGen', `Saving key-points.json to storage warning: ${kpStoreErr?.message}`, 'WARN');
+        }
+      } else {
+        const kpErr = keyPointsResult?.errorMessage || (keyPointsSettled.status === 'rejected' ? keyPointsSettled.reason?.message : 'Bypassed');
+        this.logDisk('keyPointsGen', `Key Points Generation bypassed/failed (non-fatal, summary preserved): ${kpErr}`, 'WARN');
       }
 
-      // ── 9. PDF Rendering & Storage ─────────────────────────────────────────
+      // ── 9. Controlled Parallel PDF Rendering & Storage ─────────────────────
       // NOTE: allowAfterLeaseLoss=true here — summaryGen already checkpointed so
       // even if the heartbeat misfired during the long AI call, we MUST complete
       // the PDF step. Not doing so causes the "summary saved but no PDF in folder" bug.
@@ -820,13 +820,21 @@ export class AIJobScheduler {
       }).eq('document_id', this.documentId);
 
       const pdfStartMs = Date.now();
-      let pdfBuffer: Buffer;
-      try {
-        pdfBuffer = await generateSummaryPDF(summaryResult.summary, docTitle, subjectName);
-        this.logDisk('pdfRender', 'PDF Generated', 'INFO');
-      } catch (err: any) {
-        const errMsg = err?.message || String(err);
-        this.logDisk('pdfRender', 'PDF Rendering Failed', 'ERROR');
+      const ts = Date.now();
+      const pdfStoragePath = `${this.userId}/ai-gen-${ts}-${this.documentId.substring(0, 8)}-summary.pdf`;
+      const kpPdfStoragePath = `${this.userId}/ai-gen-${ts}-${this.documentId.substring(0, 8)}-keypoints.pdf`;
+
+      // Parallelize PDF generation bounded strictly to Summary and Key Points
+      const [summaryPdfSettled, keyPointsPdfSettled] = await Promise.allSettled([
+        generateSummaryPDF(summaryResult.summary, docTitle, subjectName),
+        keyPointsResult && keyPointsResult.success
+          ? generateKeyPointsPDF(keyPointsResult, docTitle, subjectName)
+          : Promise.resolve(null)
+      ]);
+
+      if (summaryPdfSettled.status === 'rejected' || !summaryPdfSettled.value) {
+        const errMsg = summaryPdfSettled.status === 'rejected' ? summaryPdfSettled.reason?.message : 'Empty PDF buffer';
+        this.logDisk('pdfRender', 'Summary PDF Rendering Failed', 'ERROR');
         this.logDisk('pdfRender', `Failure Details — document: ${this.documentId}, user: ${this.userId}, stage: pdfRender, duration: ${Date.now() - pdfStartMs}ms, reason: ${errMsg}`, 'ERROR');
         this.updateStage('pdfRender', {
           status: 'failed',
@@ -844,10 +852,11 @@ export class AIJobScheduler {
         return;
       }
 
-      // Upload PDF to Supabase Storage
-      this.logDisk('pdfRender', 'Uploading PDF', 'INFO');
-      const ts = Date.now();
-      const pdfStoragePath = `${this.userId}/ai-gen-${ts}-${this.documentId.substring(0, 8)}-summary.pdf`;
+      const pdfBuffer = summaryPdfSettled.value;
+      this.logDisk('pdfRender', 'Summary PDF Generated Successfully', 'INFO');
+
+      // Upload Summary PDF to Supabase Storage
+      this.logDisk('pdfRender', 'Uploading Summary PDF to Storage', 'INFO');
       const { error: upErr } = await this.supabase.storage
         .from('documents')
         .upload(pdfStoragePath, pdfBuffer, {
@@ -858,7 +867,7 @@ export class AIJobScheduler {
 
       if (upErr) {
         const errMsg = `Upload failed for PDF: ${upErr.message}`;
-        this.logDisk('pdfRender', 'PDF Rendering Failed', 'ERROR');
+        this.logDisk('pdfRender', 'PDF Storage Upload Failed', 'ERROR');
         this.logDisk('pdfRender', `Failure Details — document: ${this.documentId}, user: ${this.userId}, stage: pdfRender, duration: ${Date.now() - pdfStartMs}ms, reason: ${errMsg}`, 'ERROR');
         this.updateStage('pdfRender', {
           status: 'failed',
@@ -880,39 +889,33 @@ export class AIJobScheduler {
         .from('documents')
         .getPublicUrl(pdfStoragePath);
 
-      // Render & Upload Key Points PDF (if keyPoints generated successfully)
+      // Handle Key Points PDF upload if available
       let keyPointsPdfBuffer: Buffer | null = null;
-      let kpPdfStoragePath: string | null = null;
       let kpPublicUrl: string | null = null;
 
-      if (keyPointsResult && keyPointsResult.success) {
-        try {
-          this.logDisk('pdfRender', 'Key Points PDF Rendering Started', 'INFO');
-          keyPointsPdfBuffer = await generateKeyPointsPDF(keyPointsResult, docTitle, subjectName);
-          this.logDisk('pdfRender', 'Key Points PDF Generated', 'INFO');
+      if (keyPointsPdfSettled.status === 'fulfilled' && keyPointsPdfSettled.value) {
+        keyPointsPdfBuffer = keyPointsPdfSettled.value;
+        this.logDisk('pdfRender', 'Key Points PDF Generated Successfully', 'INFO');
 
-          kpPdfStoragePath = `${this.userId}/ai-gen-${ts}-${this.documentId.substring(0, 8)}-keypoints.pdf`;
-          const { error: kpUpErr } = await this.supabase.storage
-            .from('documents')
-            .upload(kpPdfStoragePath, keyPointsPdfBuffer, {
-              contentType: 'application/pdf',
-              cacheControl: '3600',
-              upsert: true
-            });
+        const { error: kpUpErr } = await this.supabase.storage
+          .from('documents')
+          .upload(kpPdfStoragePath, keyPointsPdfBuffer, {
+            contentType: 'application/pdf',
+            cacheControl: '3600',
+            upsert: true
+          });
 
-          if (kpUpErr) {
-            this.logDisk('pdfRender', `Upload failed for KeyPoints PDF: ${kpUpErr.message}`, 'WARN');
-            keyPointsPdfBuffer = null;
-          } else {
-            const { data: { publicUrl: kpUrl } } = this.supabase.storage
-              .from('documents')
-              .getPublicUrl(kpPdfStoragePath);
-            kpPublicUrl = kpUrl;
-          }
-        } catch (kpPdfErr: any) {
-          this.logDisk('pdfRender', `Key Points PDF generation failed (non-fatal): ${kpPdfErr?.message}`, 'WARN');
+        if (kpUpErr) {
+          this.logDisk('pdfRender', `Upload failed for KeyPoints PDF (non-fatal): ${kpUpErr.message}`, 'WARN');
           keyPointsPdfBuffer = null;
+        } else {
+          const { data: { publicUrl: kpUrl } } = this.supabase.storage
+            .from('documents')
+            .getPublicUrl(kpPdfStoragePath);
+          kpPublicUrl = kpUrl;
         }
+      } else if (keyPointsPdfSettled.status === 'rejected') {
+        this.logDisk('pdfRender', `Key Points PDF generation failed (non-fatal): ${keyPointsPdfSettled.reason?.message}`, 'WARN');
       }
 
       // ── Old PDF Cleanup (Version Storage Optimisation) ─────────────────────

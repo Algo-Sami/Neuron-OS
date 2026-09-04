@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BrainCircuit, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 
 const NAV_LINKS = [
   { label: "Home", href: "#home", type: "hash" },
@@ -22,7 +22,7 @@ export function LandingNavbar() {
   const isLanding = pathname === "/";
 
   useEffect(() => {
-    const handler = () => setScrolled(window.scrollY > 20);
+    const handler = () => setScrolled(window.scrollY > 15);
     window.addEventListener("scroll", handler, { passive: true });
     return () => window.removeEventListener("scroll", handler);
   }, []);
@@ -33,7 +33,7 @@ export function LandingNavbar() {
   ) => {
     if (link.type === "route") {
       setMobileOpen(false);
-      return; // Let Next Link handle it
+      return;
     }
     e.preventDefault();
     setMobileOpen(false);
@@ -48,47 +48,46 @@ export function LandingNavbar() {
   return (
     <>
       <nav
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
           scrolled
-            ? "bg-[#080810]/85 backdrop-blur-2xl border-b border-white/[0.06] shadow-xl shadow-black/20"
-            : "bg-transparent"
+            ? "bg-white/95 backdrop-blur-md border-b border-[#d0d4db] shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
+            : "bg-white/90 backdrop-blur-md border-b border-[#e1dfdd]"
         }`}
+        style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+          <div className="flex items-center justify-between h-14">
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2.5 group flex-shrink-0">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 shadow-lg shadow-violet-500/25 group-hover:shadow-violet-500/45 transition-all duration-300 group-hover:scale-105">
-                <BrainCircuit className="h-5 w-5 text-white" />
+              <div className="flex h-7 w-7 items-center justify-center rounded-[3px] bg-[#0078d4] text-white font-bold text-xs shadow-sm">
+                N
               </div>
               <div className="flex flex-col leading-none">
-                <span className="text-base font-black tracking-tighter text-white">NEURON OS</span>
-                <span className="text-[9px] font-bold uppercase tracking-widest text-violet-400 leading-none">
+                <span className="text-sm font-semibold tracking-wide text-[#201f1e]">
+                  NEURON OS
+                </span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-[#0078d4] leading-none mt-0.5">
                   Academic AI
                 </span>
               </div>
             </Link>
 
             {/* Desktop Nav Links */}
-            <div className="hidden md:flex items-center gap-0.5">
+            <div className="hidden md:flex items-center gap-1">
               {NAV_LINKS.map((link) => {
-                const isActive =
-                  link.type === "route" && pathname === link.href;
+                const isActive = link.type === "route" && pathname === link.href;
                 if (link.type === "route") {
                   return (
                     <Link
                       key={link.href}
                       href={link.href}
-                      className={`relative px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 group ${
+                      className={`relative px-3 py-1.5 text-[13px] font-normal rounded-[3px] transition-colors duration-150 ${
                         isActive
-                          ? "text-violet-400 bg-violet-500/10"
-                          : "text-neutral-300 hover:text-white hover:bg-white/[0.06]"
+                          ? "text-[#0078d4] bg-[#e5f1fb] font-medium"
+                          : "text-[#323130] hover:text-[#0078d4] hover:bg-[#f3f2f1]"
                       }`}
                     >
                       {link.label}
-                      {isActive && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-violet-400" />
-                      )}
                     </Link>
                   );
                 }
@@ -97,7 +96,7 @@ export function LandingNavbar() {
                     key={link.href}
                     href={link.href}
                     onClick={(e) => handleNavClick(e, link)}
-                    className="px-4 py-2 text-sm font-medium text-neutral-300 hover:text-white rounded-lg hover:bg-white/[0.06] transition-all duration-200"
+                    className="px-3 py-1.5 text-[13px] font-normal text-[#323130] hover:text-[#0078d4] rounded-[3px] hover:bg-[#f3f2f1] transition-colors duration-150"
                   >
                     {link.label}
                   </a>
@@ -106,16 +105,16 @@ export function LandingNavbar() {
             </div>
 
             {/* Desktop CTA Buttons */}
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-2.5">
               <Link
                 href="/login"
-                className="px-4 py-2 text-sm font-semibold text-neutral-300 hover:text-white transition-colors duration-200"
+                className="px-3.5 py-1.5 text-[13px] font-medium text-[#201f1e] hover:text-[#0078d4] hover:bg-[#f3f2f1] rounded-[3px] border border-[#d0d4db] transition-colors duration-150"
               >
                 Login
               </Link>
               <Link
                 href="/login"
-                className="px-5 py-2 text-sm font-bold text-white rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 shadow-lg shadow-violet-600/25 hover:shadow-violet-500/40 transition-all duration-300 hover:scale-105 active:scale-100"
+                className="px-4 py-1.5 text-[13px] font-semibold text-white rounded-[3px] bg-[#0078d4] hover:bg-[#106ebe] shadow-sm transition-colors duration-150"
               >
                 Get Started
               </Link>
@@ -124,7 +123,7 @@ export function LandingNavbar() {
             {/* Mobile Hamburger */}
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-2 rounded-lg text-neutral-300 hover:text-white hover:bg-white/[0.06] transition-colors"
+              className="md:hidden p-1.5 rounded-[3px] text-[#323130] hover:text-[#0078d4] hover:bg-[#f3f2f1] transition-colors"
               aria-label="Toggle menu"
             >
               {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -134,11 +133,11 @@ export function LandingNavbar() {
 
         {/* Mobile Menu */}
         <div
-          className={`md:hidden transition-all duration-300 overflow-hidden ${
+          className={`md:hidden transition-all duration-200 overflow-hidden ${
             mobileOpen ? "max-h-[520px] opacity-100" : "max-h-0 opacity-0"
           }`}
         >
-          <div className="bg-[#080810]/97 backdrop-blur-2xl border-t border-white/[0.06] px-4 py-4 space-y-1">
+          <div className="bg-white border-t border-[#e1dfdd] px-4 py-3 space-y-1 shadow-lg">
             {NAV_LINKS.map((link) => {
               if (link.type === "route") {
                 return (
@@ -146,10 +145,10 @@ export function LandingNavbar() {
                     key={link.href}
                     href={link.href}
                     onClick={() => setMobileOpen(false)}
-                    className={`block px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200 ${
+                    className={`block px-3 py-2 text-[13px] font-normal rounded-[3px] transition-colors ${
                       pathname === link.href
-                        ? "text-violet-400 bg-violet-500/10"
-                        : "text-neutral-300 hover:text-white hover:bg-white/[0.06]"
+                        ? "text-[#0078d4] bg-[#e5f1fb] font-medium"
+                        : "text-[#323130] hover:text-[#0078d4] hover:bg-[#f3f2f1]"
                     }`}
                   >
                     {link.label}
@@ -161,24 +160,24 @@ export function LandingNavbar() {
                   key={link.href}
                   href={link.href}
                   onClick={(e) => handleNavClick(e, link)}
-                  className="block px-4 py-3 text-sm font-medium text-neutral-300 hover:text-white hover:bg-white/[0.06] rounded-lg transition-all duration-200"
+                  className="block px-3 py-2 text-[13px] font-normal text-[#323130] hover:text-[#0078d4] hover:bg-[#f3f2f1] rounded-[3px] transition-colors"
                 >
                   {link.label}
                 </a>
               );
             })}
-            <div className="pt-3 border-t border-white/[0.06] flex flex-col gap-2">
+            <div className="pt-2 border-t border-[#e1dfdd] flex flex-col gap-2">
               <Link
                 href="/login"
                 onClick={() => setMobileOpen(false)}
-                className="block px-4 py-3 text-sm font-semibold text-center text-neutral-300 hover:text-white border border-white/10 rounded-xl transition-colors"
+                className="block px-3 py-2 text-[13px] font-medium text-center text-[#201f1e] hover:bg-[#f3f2f1] border border-[#d0d4db] rounded-[3px] transition-colors"
               >
                 Login
               </Link>
               <Link
                 href="/login"
                 onClick={() => setMobileOpen(false)}
-                className="block px-4 py-3 text-sm font-bold text-center text-white rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition-all"
+                className="block px-3 py-2 text-[13px] font-semibold text-center text-white rounded-[3px] bg-[#0078d4] hover:bg-[#106ebe] transition-colors"
               >
                 Get Started Free
               </Link>

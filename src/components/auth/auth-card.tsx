@@ -1,22 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Mail,
-  Lock,
-  Eye,
-  EyeOff,
-  Sparkles,
-  AlertCircle,
-  Loader2,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Eye, EyeOff, AlertCircle, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
-// ─── Password strength helper ────────────────────────────────────────────────
+// ─── Font stack ───────────────────────────────────────────────────────────────
+const FONT = '"Segoe UI Variable", "Segoe UI", Inter, system-ui, sans-serif';
+
+// ─── Password strength ────────────────────────────────────────────────────────
 function getPasswordStrength(pwd: string): number {
   let score = 0;
   if (pwd.length >= 8) score++;
@@ -26,10 +18,10 @@ function getPasswordStrength(pwd: string): number {
   return score;
 }
 
-// ─── Google SVG logo ─────────────────────────────────────────────────────────
+// ─── Google icon ──────────────────────────────────────────────────────────────
 function GoogleIcon() {
   return (
-    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24">
+    <svg className="h-4 w-4" viewBox="0 0 24 24">
       <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.66 1.48 14.97 1 12 1 7.24 1 3.2 3.73 1.24 7.72l3.82 2.96C6.01 7.26 8.78 5.04 12 5.04z" />
       <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.46c-.29 1.48-1.14 2.73-2.42 3.57v2.96h3.91c2.28-2.1 3.54-5.19 3.54-8.68z" />
       <path fill="#FBBC05" d="M5.06 10.68c-.25-.72-.39-1.49-.39-2.28s.14-1.56.39-2.28L1.24 7.16C.45 8.76 0 10.56 0 12.4s.45 3.64 1.24 5.24l3.82-2.96z" />
@@ -38,47 +30,268 @@ function GoogleIcon() {
   );
 }
 
-// ─── Divider ─────────────────────────────────────────────────────────────────
-function OrDivider() {
+// ─── Apple icon ───────────────────────────────────────────────────────────────
+function AppleIcon() {
   return (
-    <div className="relative flex items-center justify-center my-4">
-      <div className="absolute inset-0 flex items-center">
-        <span className="w-full border-t border-slate-200" />
-      </div>
-      <span className="relative bg-white px-3 text-[9px] font-bold uppercase text-slate-400 tracking-widest">
-        Or continue with
-      </span>
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+    </svg>
+  );
+}
+
+// ─── Field label ──────────────────────────────────────────────────────────────
+function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
+  return (
+    <label
+      htmlFor={htmlFor}
+      style={{
+        display: "block",
+        fontSize: 12,
+        fontWeight: 400,
+        color: "#323130",
+        marginBottom: 4,
+        fontFamily: FONT,
+      }}
+    >
+      {children}
+    </label>
+  );
+}
+
+// ─── Text input ───────────────────────────────────────────────────────────────
+interface TextInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  id: string;
+}
+function TextInput({ id, ...props }: TextInputProps) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <input
+      id={id}
+      {...props}
+      onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
+      onBlur={(e) => { setFocused(false); props.onBlur?.(e); }}
+      style={{
+        width: "100%",
+        height: 34,
+        padding: "0 10px",
+        fontSize: 13,
+        fontFamily: FONT,
+        color: "#201f1e",
+        background: "#ffffff",
+        border: focused ? "1px solid #005a9e" : "1px solid #d0d4db",
+        borderRadius: 3,
+        outline: "none",
+        boxShadow: focused ? "0 0 0 2px rgba(0, 120, 212, 0.15)" : "none",
+        boxSizing: "border-box",
+        transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+      }}
+    />
+  );
+}
+
+// ─── Password input ───────────────────────────────────────────────────────────
+function PasswordInput({
+  id, value, onChange, placeholder,
+}: {
+  id: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        id={id}
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          width: "100%",
+          height: 34,
+          padding: "0 32px 0 10px",
+          fontSize: 13,
+          fontFamily: FONT,
+          color: "#201f1e",
+          background: "#ffffff",
+          border: focused ? "1px solid #005a9e" : "1px solid #d0d4db",
+          borderRadius: 3,
+          outline: "none",
+          boxShadow: focused ? "0 0 0 2px rgba(0, 120, 212, 0.15)" : "none",
+          boxSizing: "border-box",
+          transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow(!show)}
+        style={{
+          position: "absolute",
+          right: 6,
+          top: "50%",
+          transform: "translateY(-50%)",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          color: "#605e5c",
+          padding: 0,
+          display: "flex",
+          alignItems: "center",
+        }}
+        aria-label="Toggle password visibility"
+      >
+        {show ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Divider ──────────────────────────────────────────────────────────────────
+function Divider({ text }: { text: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 0" }}>
+      <div style={{ flex: 1, height: 1, background: "#e1dfdd" }} />
+      <span style={{ fontSize: 11, color: "#8a8886", fontFamily: FONT, whiteSpace: "nowrap" }}>
+        {text}
+      </span>
+      <div style={{ flex: 1, height: 1, background: "#e1dfdd" }} />
+    </div>
+  );
+}
+
+// ─── Primary button ───────────────────────────────────────────────────────────
+function PrimaryButton({
+  children, disabled, type = "submit",
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  type?: "submit" | "button";
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: "100%",
+        height: 32,
+        fontSize: 13,
+        fontWeight: 600,
+        fontFamily: FONT,
+        color: "#ffffff",
+        background: disabled ? "#a0aec0" : hovered ? "#106ebe" : "#0078d4",
+        border: "none",
+        borderRadius: 2,
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "background 0.1s",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ─── Secondary (social) button ────────────────────────────────────────────────
+function SocialButton({
+  onClick, disabled, children,
+}: {
+  onClick?: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        flex: 1,
+        width: "100%",
+        height: 40,
+        fontSize: 13,
+        fontWeight: 500,
+        fontFamily: FONT,
+        color: "#201f1e",
+        background: hovered ? "#f3f2f1" : "#ffffff",
+        border: "1px solid #8a8886",
+        borderRadius: 4,
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "background 0.1s",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+
+
+// ─── Main component ───────────────────────────────────────────────────────────
 export function AuthCard() {
   const router = useRouter();
 
-  // ── Shared state ──
   const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
   const [loading, setLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<"google" | "apple" | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // ── Sign In state ──
+  // Auto-reset loading state if user presses browser back button or switches tabs
+  useEffect(() => {
+    const handleReset = () => {
+      setLoading(false);
+      setSocialLoading(null);
+    };
+
+    window.addEventListener("pageshow", handleReset);
+    window.addEventListener("focus", handleReset);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleReset();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pageshow", handleReset);
+      window.removeEventListener("focus", handleReset);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  // Sign In
   const [signInEmail, setSignInEmail] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
-  const [showSignInPassword, setShowSignInPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
 
-  // ── Sign Up state ──
+  // Sign Up
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
-  const [showSignUpPassword, setShowSignUpPassword] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
 
   const signUpStrength = getPasswordStrength(signUpPassword);
 
-  // ── Google OAuth (shared between sign-in and sign-up tabs) ──
   const handleGoogleLogin = async () => {
     setErrorMsg("");
-    setLoading(true);
+    setSocialLoading("google");
     try {
       const supabase = createClient();
       const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -88,347 +301,254 @@ export function AuthCard() {
       });
       if (error) throw error;
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : "OAuth redirection failed.");
-      setLoading(false);
+      setErrorMsg(err instanceof Error ? err.message : "OAuth failed.");
+      setSocialLoading(null);
     }
   };
 
-  // ── Sign In submit ──
-  const handleSignInSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!signInEmail || !signInPassword) {
-      setErrorMsg("Please fill in all fields.");
-      return;
-    }
+  const handleAppleLogin = async () => {
     setErrorMsg("");
-    setLoading(true);
+    setSocialLoading("apple");
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
-        email: signInEmail,
-        password: signInPassword,
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "apple",
+        options: { redirectTo: `${origin}/auth/callback` },
       });
-      if (error) {
-        setErrorMsg(error.message);
-        setLoading(false);
-      } else {
-        router.push("/dashboard");
-        router.refresh();
-      }
+      if (error) throw error;
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to sign in.");
+      setErrorMsg(err instanceof Error ? err.message : "Apple OAuth failed.");
+      setSocialLoading(null);
+    }
+  };
+
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signInEmail || !signInPassword) { setErrorMsg("Please fill in all fields."); return; }
+    setErrorMsg(""); setLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({ email: signInEmail, password: signInPassword });
+      if (error) { setErrorMsg(error.message); setLoading(false); }
+      else { router.push("/dashboard"); router.refresh(); }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Sign in failed.");
       setLoading(false);
     }
   };
 
-  // ── Quick Sign Up submit ──
-  const handleSignUpSubmit = async (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signUpEmail || !signUpPassword) {
-      setErrorMsg("Please enter your email and a password.");
-      return;
-    }
-    if (signUpPassword.length < 8) {
-      setErrorMsg("Password must be at least 8 characters.");
-      return;
-    }
-    setErrorMsg("");
-    setLoading(true);
+    if (!firstName || !signUpEmail || !signUpPassword) { setErrorMsg("Please fill in all required fields."); return; }
+    if (signUpPassword.length < 8) { setErrorMsg("Password must be at least 8 characters."); return; }
+    if (!agreedToTerms) { setErrorMsg("Please agree to the Terms & Conditions."); return; }
+    setErrorMsg(""); setLoading(true);
     try {
-      // Dynamically import to avoid bundling server-only imports on the client
       const { quickSignUp } = await import("@/actions/auth");
-      const result = await quickSignUp(signUpEmail, signUpPassword);
-
-      if (!result.success) {
-        setErrorMsg(result.error ?? "Sign up failed. Please try again.");
-        setLoading(false);
-        return;
-      }
-
-      if (result.requiresConfirmation) {
-        // Email confirmation is enabled in Supabase.
-        // The user has no active session yet — do NOT redirect to /dashboard.
-        setConfirmationSent(true);
-        setLoading(false);
-      } else {
-        // No confirmation required — active session exists, go straight to dashboard.
-        router.push("/dashboard");
-        router.refresh();
-      }
+      const result = await quickSignUp(signUpEmail, signUpPassword, {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
+      });
+      if (!result.success) { setErrorMsg(result.error ?? "Sign up failed."); setLoading(false); return; }
+      if (result.requiresConfirmation) { setConfirmationSent(true); setLoading(false); }
+      else { router.push("/dashboard"); router.refresh(); }
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : "An unexpected error occurred.");
+      setErrorMsg(err instanceof Error ? err.message : "An error occurred.");
       setLoading(false);
     }
   };
 
   return (
-    <div className="w-full max-w-md p-6 bg-white border border-slate-200 shadow-[0_20px_60px_rgba(0,0,0,0.15)] rounded-3xl relative select-none">
+    <div style={{ width: "100%", maxWidth: 380, fontFamily: FONT }}>
 
-      {/* ── Tab Switcher ── */}
-      <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
-        {(["signin", "signup"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => {
-              setActiveTab(tab);
-              setErrorMsg("");
-              if (tab === "signup") setConfirmationSent(false);
-            }}
-            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 cursor-pointer ${
-              activeTab === tab
-                ? "bg-[#0F172A] text-white shadow-sm"
-                : "text-[#64748B] hover:text-slate-700"
-            }`}
-          >
-            {tab === "signin" ? "Sign In" : "Create Account"}
-          </button>
-        ))}
+      {/* Page heading */}
+      <div style={{ marginBottom: 18 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: "#201f1e", margin: 0, fontFamily: FONT }}>
+          {activeTab === "signin" ? "Sign in" : "Create account"}
+        </h1>
+        <p style={{ fontSize: 13, color: "#605e5c", marginTop: 4, fontFamily: FONT }}>
+          {activeTab === "signin"
+            ? "Sign in to your Neuron OS workspace"
+            : "Register for a new student workspace"}
+        </p>
       </div>
 
-      {/* ── Error Banner ── */}
+      {/* Error message */}
       {errorMsg && (
-        <div className="flex items-start gap-2 p-2.5 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl mb-4 animate-in fade-in duration-150">
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+        <div
+          style={{
+            display: "flex", alignItems: "flex-start", gap: 6,
+            background: "#fde7e9", border: "1px solid #f1707b",
+            borderRadius: 2, padding: "7px 10px",
+            fontSize: 12, color: "#a4262c", marginBottom: 14,
+            fontFamily: FONT,
+          }}
+        >
+          <AlertCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════
-          SIGN IN TAB — untouched from original
-      ══════════════════════════════════════════════════════════════ */}
+      {/* ══ SIGN IN ══════════════════════════════════════════════════════ */}
       {activeTab === "signin" && (
-        <form onSubmit={handleSignInSubmit} className="space-y-4">
-          <div className="text-center space-y-1 mb-6">
-            <h2 className="text-sm font-bold tracking-tight text-slate-900">Welcome back</h2>
-            <p className="text-xs text-slate-500">Sign in to your academic workspace</p>
+        <form onSubmit={handleSignIn} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+          {/* Google + Apple side by side */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <SocialButton onClick={handleGoogleLogin} disabled={loading || !!socialLoading}>
+              {socialLoading === "google" ? <Loader2 size={14} className="animate-spin" /> : <GoogleIcon />} Google
+            </SocialButton>
+            <SocialButton onClick={handleAppleLogin} disabled={loading || !!socialLoading}>
+              {socialLoading === "apple" ? <Loader2 size={14} className="animate-spin" /> : <AppleIcon />} Apple
+            </SocialButton>
           </div>
 
-          {/* Email */}
-          <div className="space-y-1 text-left">
-            <Label htmlFor="signin-email" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-              Email address
-            </Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <Input
-                id="signin-email"
-                type="email"
-                placeholder="name@university.edu"
-                value={signInEmail}
-                onChange={(e) => setSignInEmail(e.target.value)}
-                required
-                className="h-9 text-xs pl-9 rounded-lg bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:ring-[#38BDF8]/30"
-              />
-            </div>
-          </div>
+          <Divider text="Or sign in with email" />
 
-          {/* Password */}
-          <div className="space-y-1 text-left">
-            <div className="flex justify-between items-center">
-              <Label htmlFor="signin-password" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                Password
-              </Label>
-              <a href="#" className="text-[9px] font-bold text-[#0EA5E9] hover:underline">Forgot password?</a>
-            </div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <Input
-                id="signin-password"
-                type={showSignInPassword ? "text" : "password"}
-                value={signInPassword}
-                onChange={(e) => setSignInPassword(e.target.value)}
-                required
-                className="h-9 text-xs pl-9 pr-9 rounded-lg bg-slate-50 border-slate-200 text-slate-900 focus-visible:ring-[#38BDF8]/30"
-              />
-              <button
-                type="button"
-                onClick={() => setShowSignInPassword(!showSignInPassword)}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                {showSignInPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Remember me */}
-          <div className="flex items-center gap-2 pt-1 select-none">
-            <input
-              type="checkbox"
-              id="remember-me"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-slate-300 bg-white accent-[#0F172A] cursor-pointer"
+          <div>
+            <FieldLabel htmlFor="si-email">Email address</FieldLabel>
+            <TextInput
+              id="si-email" type="email" required
+              value={signInEmail}
+              onChange={(e) => setSignInEmail(e.target.value)}
+              placeholder="name@university.edu"
             />
-            <label htmlFor="remember-me" className="text-[11px] font-semibold text-slate-500 cursor-pointer">
-              Remember me
+          </div>
+
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <FieldLabel htmlFor="si-password">Password</FieldLabel>
+              <a href="#" style={{ fontSize: 11, color: "#0078d4", textDecoration: "none", fontFamily: FONT }}>
+                Forgot password?
+              </a>
+            </div>
+            <PasswordInput id="si-password" value={signInPassword} onChange={(e) => setSignInPassword(e.target.value)} />
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" id="si-remember" defaultChecked style={{ accentColor: "#0078d4", cursor: "pointer" }} />
+            <label htmlFor="si-remember" style={{ fontSize: 12, color: "#323130", cursor: "pointer", fontFamily: FONT }}>
+              Keep me signed in
             </label>
           </div>
 
-          <Button
-            type="submit"
-            disabled={loading}
-            className="w-full h-9 text-xs font-semibold rounded-lg bg-[#0F172A] hover:bg-[#1E293B] text-white mt-2 gap-1.5 shadow-sm cursor-pointer"
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In"}
-          </Button>
+          <PrimaryButton disabled={loading || !!socialLoading}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : "Sign in"}
+          </PrimaryButton>
 
-          <OrDivider />
-
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleGoogleLogin}
-            disabled={loading}
-            className="w-full h-9 text-xs font-semibold rounded-lg border-slate-200 bg-white hover:bg-slate-50 text-slate-700 gap-2 shadow-sm cursor-pointer"
-          >
-            <GoogleIcon /> Google
-          </Button>
+          <p style={{ textAlign: "center", fontSize: 12, color: "#605e5c", margin: 0, fontFamily: FONT }}>
+            Don&apos;t have an account?{" "}
+            <button type="button" onClick={() => { setActiveTab("signup"); setErrorMsg(""); }}
+              style={{ color: "#0078d4", background: "none", border: "none", cursor: "pointer", fontSize: 12, padding: 0, fontFamily: FONT }}>
+              Create one
+            </button>
+          </p>
         </form>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════
-          SIGN UP TAB — simplified: email + password only
-      ══════════════════════════════════════════════════════════════ */}
+      {/* ══ SIGN UP ══════════════════════════════════════════════════════ */}
       {activeTab === "signup" && (
-        <div className="animate-in fade-in duration-150">
-
-          {/* ── Email confirmation sent state ── */}
+        <div>
           {confirmationSent ? (
-            <div className="text-center space-y-5 py-4">
-              <div className="mx-auto w-14 h-14 rounded-full bg-[#38BDF8]/10 border border-[#38BDF8]/20 flex items-center justify-center">
-                <Mail className="h-6 w-6 text-[#38BDF8]" />
-              </div>
-              <div className="space-y-1.5">
-                <h3 className="text-sm font-bold text-slate-900">Check your inbox</h3>
-                <p className="text-xs text-slate-500 leading-relaxed max-w-[260px] mx-auto">
-                  We sent a confirmation link to{" "}
-                  <span className="font-semibold text-slate-700">{signUpEmail}</span>.
-                  {" "}Click it to activate your account.
-                </p>
-              </div>
+            <div style={{ textAlign: "center", padding: "24px 0" }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📧</div>
+              <p style={{ fontSize: 14, fontWeight: 600, color: "#201f1e", marginBottom: 6, fontFamily: FONT }}>
+                Check your email
+              </p>
+              <p style={{ fontSize: 12, color: "#605e5c", lineHeight: 1.6, fontFamily: FONT }}>
+                A confirmation link was sent to <strong>{signUpEmail}</strong>.
+                Click it to activate your workspace.
+              </p>
               <button
                 type="button"
-                onClick={() => {
-                  setConfirmationSent(false);
-                  setSignUpEmail("");
-                  setSignUpPassword("");
-                  setErrorMsg("");
-                }}
-                className="text-[11px] font-bold text-[#0EA5E9] hover:underline cursor-pointer"
+                onClick={() => { setConfirmationSent(false); setSignUpEmail(""); setSignUpPassword(""); setErrorMsg(""); }}
+                style={{ marginTop: 14, fontSize: 12, color: "#0078d4", background: "none", border: "none", cursor: "pointer", fontFamily: FONT }}
               >
                 ← Use a different email
               </button>
             </div>
           ) : (
-            /* ── Normal quick-signup form ── */
-            <form onSubmit={handleSignUpSubmit} className="space-y-4">
-              <div className="text-center space-y-1 mb-4">
-                <h3 className="text-sm font-bold tracking-tight text-slate-900">Create your account</h3>
-                <p className="text-[11px] text-slate-500">
-                  Just your email and a password —{" "}
-                  <span className="text-[#0EA5E9] font-semibold">complete your profile later</span>
-                </p>
+            <form onSubmit={handleSignUp} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+              {/* Google + Apple side by side */}
+              <div style={{ display: "flex", gap: 8 }}>
+                <SocialButton onClick={handleGoogleLogin} disabled={loading || !!socialLoading}>
+                  {socialLoading === "google" ? <Loader2 size={14} className="animate-spin" /> : <GoogleIcon />} Google
+                </SocialButton>
+                <SocialButton onClick={handleAppleLogin} disabled={loading || !!socialLoading}>
+                  {socialLoading === "apple" ? <Loader2 size={14} className="animate-spin" /> : <AppleIcon />} Apple
+                </SocialButton>
               </div>
 
-              {/* Email */}
-              <div className="space-y-1 text-left">
-                <Label htmlFor="signup-email" className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                  Email address
-                </Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input
-                    id="signup-email"
-                    type="email"
-                    placeholder="name@university.edu"
-                    value={signUpEmail}
-                    onChange={(e) => setSignUpEmail(e.target.value)}
-                    required
-                    className="h-9 text-xs pl-9 rounded-lg bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:ring-[#38BDF8]/30"
-                  />
+              <Divider text="Or register with email" />
+
+              {/* First + Last name */}
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <FieldLabel htmlFor="su-fname">First name <span style={{ color: "#a4262c" }}>*</span></FieldLabel>
+                  <TextInput id="su-fname" type="text" required value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First name" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <FieldLabel htmlFor="su-lname">Last name</FieldLabel>
+                  <TextInput id="su-lname" type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last name" />
                 </div>
               </div>
 
-              {/* Password */}
-              <div className="space-y-1 text-left">
-                <Label htmlFor="signup-password" className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                  Password (min. 8 characters)
-                </Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input
-                    id="signup-password"
-                    type={showSignUpPassword ? "text" : "password"}
-                    value={signUpPassword}
-                    onChange={(e) => setSignUpPassword(e.target.value)}
-                    required
-                    className="h-9 text-xs pl-9 pr-9 rounded-lg bg-slate-50 border-slate-200 text-slate-900 focus-visible:ring-[#38BDF8]/30"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowSignUpPassword(!showSignUpPassword)}
-                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    {showSignUpPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
+              <div>
+                <FieldLabel htmlFor="su-email">Email address <span style={{ color: "#a4262c" }}>*</span></FieldLabel>
+                <TextInput id="su-email" type="email" required value={signUpEmail} onChange={(e) => setSignUpEmail(e.target.value)} placeholder="name@university.edu" />
+              </div>
 
-                {/* Password strength meter */}
+              <div>
+                <FieldLabel htmlFor="su-password">Password <span style={{ color: "#a4262c" }}>*</span></FieldLabel>
+                <PasswordInput id="su-password" value={signUpPassword} onChange={(e) => setSignUpPassword(e.target.value)} placeholder="Minimum 8 characters" />
+                {/* Strength bar */}
                 {signUpPassword.length > 0 && (
-                  <div className="space-y-1 mt-1.5">
-                    <div className="flex justify-between text-[8px] font-bold text-slate-500 uppercase">
-                      <span>Strength</span>
-                      <span className={
-                        signUpStrength === 4 ? "text-emerald-600"
-                        : signUpStrength >= 2 ? "text-amber-500"
-                        : "text-red-500"
-                      }>
-                        {signUpStrength === 4 ? "Strong 🔥" : signUpStrength >= 2 ? "Medium ⚡" : "Weak ⚠️"}
-                      </span>
-                    </div>
-                    <div className="flex gap-1 h-1 w-full bg-slate-200 rounded-full overflow-hidden">
-                      {[1, 2, 3, 4].map((bar) => (
-                        <div
-                          key={bar}
-                          className={`flex-1 h-full rounded-full transition-all duration-300 ${
-                            signUpStrength >= bar
-                              ? signUpStrength === 4 ? "bg-emerald-500"
-                                : signUpStrength >= 2 ? "bg-amber-500"
-                                : "bg-red-500"
-                              : "bg-transparent"
-                          }`}
-                        />
-                      ))}
-                    </div>
+                  <div style={{ display: "flex", gap: 3, marginTop: 5 }}>
+                    {[1, 2, 3, 4].map((bar) => (
+                      <div key={bar} style={{
+                        flex: 1, height: 3, borderRadius: 2,
+                        background: signUpStrength >= bar
+                          ? signUpStrength === 4 ? "#107c10"
+                          : signUpStrength >= 2 ? "#d97706"
+                          : "#c50f1f"
+                          : "#e1dfdd",
+                        transition: "background 0.2s",
+                      }} />
+                    ))}
                   </div>
                 )}
               </div>
 
-              {/* Submit */}
-              <Button
-                type="submit"
-                id="signup-submit-btn"
-                disabled={loading || signUpPassword.length < 8}
-                className="w-full h-9 text-xs font-semibold rounded-lg bg-[#0F172A] hover:bg-[#1E293B] text-white mt-2 gap-1.5 shadow-sm cursor-pointer disabled:opacity-40"
-              >
-                {loading
-                  ? <Loader2 className="h-4 w-4 animate-spin" />
-                  : <><Sparkles className="h-3.5 w-3.5" /> Create Account</>
-                }
-              </Button>
+              {/* Terms checkbox */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <input
+                  type="checkbox" id="su-terms"
+                  checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  style={{ accentColor: "#0078d4", marginTop: 2, cursor: "pointer", flexShrink: 0 }}
+                />
+                <label htmlFor="su-terms" style={{ fontSize: 12, color: "#323130", lineHeight: 1.5, cursor: "pointer", fontFamily: FONT }}>
+                  I agree to the{" "}
+                  <a href="#" style={{ color: "#0078d4", textDecoration: "underline" }}>Terms &amp; Conditions</a>
+                  {" "}and{" "}
+                  <a href="#" style={{ color: "#0078d4", textDecoration: "underline" }}>Privacy Policy</a>
+                </label>
+              </div>
 
-              <OrDivider />
+              <PrimaryButton disabled={loading || !!socialLoading || signUpPassword.length < 8 || !agreedToTerms}>
+                {loading ? <Loader2 size={14} className="animate-spin" /> : "Create account"}
+              </PrimaryButton>
 
-              {/* Google Sign Up */}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleGoogleLogin}
-                disabled={loading}
-                className="w-full h-9 text-xs font-semibold rounded-lg border-slate-200 bg-white hover:bg-slate-50 text-slate-700 gap-2 shadow-sm cursor-pointer"
-              >
-                <GoogleIcon /> Continue with Google
-              </Button>
+              <p style={{ textAlign: "center", fontSize: 12, color: "#605e5c", margin: 0, fontFamily: FONT }}>
+                Already have an account?{" "}
+                <button type="button" onClick={() => { setActiveTab("signin"); setErrorMsg(""); }}
+                  style={{ color: "#0078d4", background: "none", border: "none", cursor: "pointer", fontSize: 12, padding: 0, fontFamily: FONT }}>
+                  Sign in
+                </button>
+              </p>
             </form>
           )}
         </div>

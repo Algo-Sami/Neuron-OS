@@ -47,7 +47,7 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
     const el = itemRef.current;
     if (!el) return;
     el.style.opacity = "0";
-    el.style.transform = "translateY(16px)";
+    el.style.transform = "translateY(12px)";
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -65,25 +65,26 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
   return (
     <div
       ref={itemRef}
-      className="border border-white/[0.06] rounded-xl overflow-hidden"
-      style={{ transition: `opacity 0.6s ease ${index * 0.07}s, transform 0.6s ease ${index * 0.07}s` }}
+      className="border border-[#d0d4db] rounded-[4px] bg-white overflow-hidden shadow-xs hover:border-[#0078d4] transition-colors"
+      style={{ transition: `opacity 0.4s ease ${index * 0.05}s, transform 0.4s ease ${index * 0.05}s, border-color 0.15s` }}
     >
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between gap-4 px-6 py-5 text-left hover:bg-white/[0.03] transition-colors duration-200"
+        type="button"
+        className="w-full flex items-center justify-between gap-4 px-5 py-3.5 text-left hover:bg-[#f8fafc] transition-colors"
         aria-expanded={open}
       >
-        <span className="text-sm font-semibold text-white">{q}</span>
+        <span className="text-xs sm:text-[13px] font-semibold text-[#201f1e]">{q}</span>
         <ChevronDown
-          className={`h-4 w-4 text-violet-400 flex-shrink-0 transition-transform duration-300 ${open ? "rotate-180" : ""}`}
+          className={`h-4 w-4 text-[#0078d4] flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
       </button>
       <div
         ref={contentRef}
-        className="overflow-hidden transition-all duration-300 ease-in-out"
+        className="overflow-hidden transition-all duration-200 ease-in-out"
         style={{ maxHeight: open ? "500px" : "0px", opacity: open ? 1 : 0 }}
       >
-        <div className="px-6 pb-5 text-sm text-neutral-400 leading-relaxed border-t border-white/[0.04] pt-4">
+        <div className="px-5 pb-4 text-xs sm:text-[12.5px] text-[#475569] leading-relaxed border-t border-[#e1dfdd] pt-3 bg-[#fbfcfd]">
           {a}
         </div>
       </div>
@@ -98,7 +99,7 @@ export function FAQSection() {
     const el = titleRef.current;
     if (!el) return;
     el.style.opacity = "0";
-    el.style.transform = "translateY(24px)";
+    el.style.transform = "translateY(16px)";
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -114,35 +115,33 @@ export function FAQSection() {
   }, []);
 
   return (
-    <section id="faqs" className="relative py-24 lg:py-32 bg-[#06060e]">
-      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-      <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 50% 40% at 50% 50%, rgba(139,92,246,0.05) 0%, transparent 70%)" }} />
-
+    <section
+      id="faqs"
+      className="relative py-20 lg:py-28 bg-white border-b border-[#e1dfdd]"
+      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+    >
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div
           ref={titleRef}
-          className="text-center mb-12 space-y-4"
-          style={{ transition: "opacity 0.7s ease, transform 0.7s ease" }}
+          className="text-center mb-12 space-y-3"
+          style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-violet-500/20 mb-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-violet-400">FAQ</span>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db] shadow-xs">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0078d4]">FAQ</span>
           </div>
-          <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight">
-            Common{" "}
-            <span className="bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
-              Questions
-            </span>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#201f1e] tracking-tight">
+            Common <span className="text-[#0078d4]">Questions</span>
           </h2>
-          <p className="text-neutral-400">
+          <p className="text-sm sm:text-base text-[#475569]">
             Everything you need to know about Neuron OS.
           </p>
         </div>
 
-        {/* FAQ Accordion */}
-        <div className="space-y-3">
-          {FAQS.map((faq, i) => (
-            <FAQItem key={i} q={faq.q} a={faq.a} index={i} />
+        {/* FAQ list */}
+        <div className="space-y-2.5">
+          {FAQS.map((faq, index) => (
+            <FAQItem key={faq.q} {...faq} index={index} />
           ))}
         </div>
       </div>

@@ -183,26 +183,6 @@ export function UploadZone({
         throw new Error(result.message || "Failed to upload file.");
       }
 
-      // Enqueue AI study pack generation in the background.
-      if (result.documentId) {
-        console.log(`[UploadTiming] Dispatching /api/generate-study-pack`);
-        try {
-          await fetch('/api/generate-study-pack', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            keepalive: true,
-            body: JSON.stringify({
-              documentId: result.documentId,
-              fileUrl: publicUrl,
-              fileType: extension,
-            }),
-          });
-          console.log(`[UploadTiming] /api/generate-study-pack response received`);
-        } catch (err) {
-          console.warn('[UploadZone] Study pack generation failed to dispatch:', err);
-        }
-      }
-
       setProgress(100)
       setStatus("success")
       

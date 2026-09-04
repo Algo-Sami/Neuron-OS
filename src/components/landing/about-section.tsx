@@ -31,33 +31,21 @@ const VALUES = [
     icon: Brain,
     title: "Second Brain for Students",
     desc: "Neuron OS acts as your intelligent academic memory — storing, organizing, and surfacing exactly what you need, when you need it.",
-    color: "text-violet-400",
-    bg: "bg-violet-500/10",
-    border: "border-violet-500/20",
   },
   {
     icon: Target,
     title: "Precision AI — Your Own Notes",
     desc: "Unlike generic AI tools, Neuron's AI only uses your uploaded materials. Get precise answers grounded in your actual course content.",
-    color: "text-cyan-400",
-    bg: "bg-cyan-500/10",
-    border: "border-cyan-500/20",
   },
   {
     icon: Zap,
     title: "Built for Academic Workflows",
     desc: "Every feature is designed specifically for university students — from lecture uploads to exam preparation to deadline tracking.",
-    color: "text-amber-400",
-    bg: "bg-amber-500/10",
-    border: "border-amber-500/20",
   },
   {
     icon: Clock,
     title: "Save 10+ Hours Per Week",
     desc: "AI handles the tedious parts — summarizing, organizing, and scheduling — so you can focus on deep understanding and retention.",
-    color: "text-emerald-400",
-    bg: "bg-emerald-500/10",
-    border: "border-emerald-500/20",
   },
 ];
 
@@ -68,7 +56,7 @@ export function AboutSection() {
     const el = sectionRef.current;
     if (!el) return;
     el.style.opacity = "0";
-    el.style.transform = "translateY(32px)";
+    el.style.transform = "translateY(24px)";
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -86,44 +74,47 @@ export function AboutSection() {
   return (
     <section
       id="about"
-      className="relative py-24 lg:py-32 bg-[#080810]"
+      className="relative py-20 lg:py-28 bg-[#f8fafc] border-b border-[#e1dfdd]"
+      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
     >
-      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-      <div className="absolute top-1/2 right-0 w-[500px] h-[500px] rounded-full bg-cyan-900/10 blur-[120px] pointer-events-none -translate-y-1/2" />
-
       <div
         ref={sectionRef}
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-        style={{ transition: "opacity 0.8s ease, transform 0.8s ease" }}
+        style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
       >
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           {/* Left: Problem → Solution */}
-          <div className="space-y-8">
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-violet-500/20">
-                <span className="text-xs font-bold uppercase tracking-widest text-violet-400">The Problem</span>
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[3px] bg-white border border-[#d0d4db] shadow-xs">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0078d4]">
+                  The Problem
+                </span>
               </div>
-              <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-tight">
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#201f1e] tracking-tight leading-tight">
                 Students Waste{" "}
-                <span className="bg-gradient-to-r from-rose-400 to-orange-400 bg-clip-text text-transparent">
-                  Thousands of Hours
-                </span>{" "}
+                <span className="text-[#a4262c]">Thousands of Hours</span>{" "}
                 on Broken Workflows
               </h2>
-              <p className="text-neutral-400 leading-relaxed">
+              <p className="text-sm sm:text-base text-[#475569] leading-relaxed">
                 The average university student juggles 5+ apps just to manage their studies. Notes in one place, deadlines in another, lectures buried in email. Neuron OS solves this.
               </p>
             </div>
 
-            {/* Problem → Solution table */}
-            <div className="space-y-3">
+            {/* Problem → Solution list */}
+            <div className="space-y-2.5">
               {PROBLEMS.map(({ icon, problem, solution }) => (
-                <div key={problem} className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                  <span className="text-2xl">{icon}</span>
-                  <div className="flex-1 grid grid-cols-2 gap-2 items-center">
-                    <div className="text-sm text-neutral-500 line-through decoration-red-400/50">{problem}</div>
-                    <div className="text-sm text-emerald-400 font-medium flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                <div
+                  key={problem}
+                  className="flex items-center gap-3.5 p-3.5 rounded-[4px] bg-white border border-[#d0d4db] shadow-xs"
+                >
+                  <span className="text-xl">{icon}</span>
+                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5 items-center">
+                    <div className="text-xs text-[#605e5c] line-through decoration-[#a4262c]/60">
+                      {problem}
+                    </div>
+                    <div className="text-xs text-[#107c41] font-semibold flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#107c41]" />
                       {solution}
                     </div>
                   </div>
@@ -133,17 +124,21 @@ export function AboutSection() {
           </div>
 
           {/* Right: Value props */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {VALUES.map(({ icon: Icon, title, desc, color, bg, border }) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {VALUES.map(({ icon: Icon, title, desc }) => (
               <div
                 key={title}
-                className={`p-5 rounded-2xl bg-white/[0.02] border ${border} hover:bg-white/[0.04] transition-all duration-300 group`}
+                className="p-5 rounded-[4px] bg-white border border-[#d0d4db] hover:border-[#0078d4] hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] transition-all duration-150 group"
               >
-                <div className={`inline-flex h-10 w-10 items-center justify-center rounded-xl ${bg} mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                  <Icon className={`h-5 w-5 ${color}`} />
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] bg-[#f0f6ff] border border-[#c7e0f4] text-[#0078d4] mb-3 group-hover:bg-[#0078d4] group-hover:text-white transition-colors">
+                  <Icon className="h-4.5 w-4.5" />
                 </div>
-                <h3 className="text-sm font-bold text-white mb-2">{title}</h3>
-                <p className="text-xs text-neutral-500 leading-relaxed group-hover:text-neutral-400 transition-colors">{desc}</p>
+                <h3 className="text-sm font-semibold text-[#201f1e] mb-1.5 group-hover:text-[#0078d4] transition-colors">
+                  {title}
+                </h3>
+                <p className="text-xs text-[#475569] leading-relaxed">
+                  {desc}
+                </p>
               </div>
             ))}
           </div>

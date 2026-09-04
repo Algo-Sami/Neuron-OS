@@ -15,19 +15,22 @@ export function FloatingWhatsApp() {
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
       {/* Tooltip label */}
       <div
-        className={`transition-all duration-300 ${
+        className={`transition-all duration-200 ${
           hovered ? "opacity-100 translate-x-0" : "opacity-0 translate-x-2 pointer-events-none"
         }`}
       >
-        <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[#0d0d18] border border-white/10 shadow-2xl shadow-black/40 backdrop-blur-xl whitespace-nowrap">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-sm font-semibold text-white">Chat with Neuron Support</span>
+        <div
+          className="flex items-center gap-2 px-3.5 py-2 rounded-[4px] bg-white border border-[#d0d4db] shadow-md whitespace-nowrap"
+          style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+        >
+          <span className="h-2 w-2 rounded-full bg-[#107c41]" />
+          <span className="text-xs font-semibold text-[#201f1e]">Chat with Neuron Support</span>
           <button
             onClick={(e) => { e.stopPropagation(); setDismissed(true); }}
-            className="ml-1 text-neutral-500 hover:text-white transition-colors"
+            className="ml-1 text-[#8a8886] hover:text-[#201f1e] transition-colors"
             aria-label="Dismiss"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3 w-3" />
           </button>
         </div>
       </div>

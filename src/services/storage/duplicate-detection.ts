@@ -149,28 +149,32 @@ export async function checkDuplicateUpload(
     return { isDuplicate: false };
   }
 
-  // 1. Resolve Subject & Folder using classification rules if not explicitly provided
-  const classification = await SubjectClassifier.classify(
-    {
-      userId,
-      filename: fileName,
-      subjectId,
-      folderId,
-      currentSubjectId,
-    },
-    { supabase }
-  );
+  // 1. Resolve Subject & Folder (Explicit selection takes priority, bypassing classification layers)
+  let resolvedSubjectId = subjectId || currentSubjectId || null;
+  let resolvedFolderId: string | null = folderId || null;
 
-  let resolvedSubjectId = classification.subjectId;
-  let resolvedFolderId: string | null = null;
+  // Run classification only if no explicit subject was provided
+  const classification = resolvedSubjectId
+    ? null
+    : await SubjectClassifier.classify(
+        {
+          userId,
+          filename: fileName,
+          subjectId,
+          folderId,
+          currentSubjectId,
+        },
+        { supabase }
+      );
 
-  if (resolvedSubjectId) {
-    if (folderId) {
-      resolvedFolderId = folderId;
-    } else {
-      const targetFolderName = classification.folderName || 'Lectures';
+  if (!resolvedSubjectId && classification) {
+    resolvedSubjectId = classification.subjectId;
+  }
 
-      if (targetFolderName === 'Lab' && classification.labSubfolderName) {
+  if (resolvedSubjectId && !resolvedFolderId) {
+    const targetFolderName = classification?.folderName || 'Lectures';
+
+      if (targetFolderName === 'Lab' && classification?.labSubfolderName) {
         // Resolve Lab root
         const { data: labParent } = await supabase
           .from('folders')
@@ -211,7 +215,6 @@ export async function checkDuplicateUpload(
         }
       }
     }
-  }
 
   // 2. Comprehensive Workspace & Subject Duplicate Query
   // Query all active documents for this user matching the target filename.
@@ -273,11 +276,11 @@ export async function checkDuplicateUpload(
 
       const subjectName = Array.isArray(duplicateDoc.subjects)
         ? duplicateDoc.subjects[0]?.name
-        : (duplicateDoc.subjects as any)?.name || classification.subjectName || null;
+        : (duplicateDoc.subjects as any)?.name || classification?.subjectName || null;
 
       const folderName = Array.isArray(duplicateDoc.folders)
         ? duplicateDoc.folders[0]?.name
-        : (duplicateDoc.folders as any)?.name || classification.folderName || null;
+        : (duplicateDoc.folders as any)?.name || classification?.folderName || null;
 
       return {
         isDuplicate: true,

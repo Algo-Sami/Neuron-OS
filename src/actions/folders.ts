@@ -137,10 +137,10 @@ export async function createFolderAction(
  * Creates only the missing standard folders. Safe to call any number of times.
  */
 export async function scaffoldSubjectFoldersAction(subjectId: string): Promise<{ success: boolean; created: string[]; skipped: string[] }> {
-  // Only the AI Generated folder is created automatically.
-  // All academic folders (Lectures, Assignments, Quizzes, Presentations, Lab, etc.)
-  // are created on-demand the first time a matching file is uploaded.
+  // Standard root-level academic and AI folders scaffolded on subject creation
   const STANDARD_FOLDERS = [
+    "Lectures",
+    "Assignments",
     "AI Generated",
   ];
 
@@ -643,5 +643,29 @@ export async function duplicateFolderAction(folderId: string) {
 
   revalidatePath("/subjects");
   return { success: true };
+}
+
+export async function getSubjectFolders(subjectId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user || !subjectId) return [];
+
+  // Idempotently ensure standard folders (Lectures, Assignments, AI Generated) exist
+  try {
+    await scaffoldSubjectFoldersAction(subjectId);
+  } catch (scaffoldErr) {
+    console.warn("[getSubjectFolders] Scaffolding check warning:", scaffoldErr);
+  }
+
+  const { data, error } = await supabase
+    .from("folders")
+    .select("id, name, parent_folder_id, created_at")
+    .eq("user_id", user.id)
+    .eq("subject_id", subjectId)
+    .is("deleted_at", null)
+    .order("name", { ascending: true });
+
+  if (error || !data) return [];
+  return data;
 }
 
