@@ -134,9 +134,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { message, conversationId: reqConversationId, documentIds } = await request.json();
+    const body = await request.json();
+    const { message, conversationId: reqConversationId } = body;
+    const rawDocIds = body.referenceDocumentIds || body.documentIds;
     if (!message) {
       return NextResponse.json({ error: 'Missing chat message' }, { status: 400 });
+    }
+
+    // Validate reference document IDs: enforce ownership, non-deleted status, and max 5 limit
+    let validatedDocumentIds: string[] | null = null;
+    if (Array.isArray(rawDocIds) && rawDocIds.length > 0) {
+      const cappedIds = rawDocIds.slice(0, 5).filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+      if (cappedIds.length > 0) {
+        const { data: userOwnedDocs } = await supabase
+          .from('documents')
+          .select('id')
+          .eq('user_id', user.id)
+          .is('deleted_at', null)
+          .in('id', cappedIds);
+        
+        if (userOwnedDocs && userOwnedDocs.length > 0) {
+          validatedDocumentIds = userOwnedDocs.map(d => d.id);
+        }
+      }
     }
 
     let conversationId = reqConversationId;
@@ -224,7 +244,7 @@ export async function POST(request: Request) {
     // 4. Pre-retrieve grounding document contexts (RAG vector search)
     const startTime = Date.now();
     logger.info(`[RAG] Querying vector database chunks for: "${message}"`);
-    const searchResults = await searchChunks(user.id, message, documentIds, 5, 0.20);
+    const searchResults = await searchChunks(user.id, message, validatedDocumentIds, 5, 0.20);
     
     interface SourceItem {
       id: string;
@@ -383,7 +403,7 @@ Strong in concepts: [${strongList.slice(0, 5).join(', ')}]`;
         toolResult = await listDocuments(user.id);
       } else if (call.name === 'searchDocumentContent') {
         const queryArg = (call.args as Record<string, unknown>).query as string;
-        const toolRes = await searchDocumentContent(user.id, queryArg, documentIds);
+        const toolRes = await searchDocumentContent(user.id, queryArg, validatedDocumentIds);
         
         if (toolRes.results) {
           toolRes.results.forEach((r) => {

@@ -47,7 +47,7 @@ export default async function SubjectsPage() {
   }));
 
   return (
-    <div className="flex flex-col flex-1 h-full min-h-0 overflow-hidden p-3">
+    <div className="flex flex-col flex-1 h-full min-h-0 overflow-hidden">
       <FileExplorer
         key={user?.id}
         initialSubjects={subjectsResult.data || []}

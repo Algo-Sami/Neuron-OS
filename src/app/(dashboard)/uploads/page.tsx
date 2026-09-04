@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { cleanupExpiredRecycledDocuments } from "@/actions/uploads";
 import { SubjectClassifier } from "@/services/classification/classifier";
-import type { PendingDoc } from "@/components/shared/classification-card";
+
 import { UploadCenter, type DocumentRow } from "@/components/uploads/upload-center";
 
 export const dynamic = 'force-dynamic';
@@ -146,23 +146,6 @@ export default async function UploadsPage() {
     ...deletedUploadRows,
   ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-  // Extract documents that are pending classification approval / review (low confidence, not deleted)
-  const pendingDocs: PendingDoc[] = (userUploadedDocs || [])
-    .filter(
-      (d) =>
-        !d.deleted_at &&
-        (d.classification_status === 'needs_review' || d.classification_status === 'pending') &&
-        (d.ai_subject || !d.subject_id)
-    )
-    .map((d) => ({
-      id: d.id,
-      title: d.title,
-      ai_subject: d.ai_subject,
-      ai_topic: d.ai_topic,
-      ai_doc_type: d.ai_doc_type,
-      classification_confidence: d.classification_confidence,
-    }));
-
   return (
     <div className="flex flex-col gap-6 max-w-[1550px] mx-auto w-full px-4 sm:px-6 pb-10 animate-in fade-in duration-300">
       {/* Page header */}
@@ -177,11 +160,10 @@ export default async function UploadsPage() {
         </div>
       </div>
 
-      {/* Upload Center — Upload Area + Needs Your Attention + Upload History */}
+      {/* Upload Center — Upload Area + Upload History */}
       <UploadCenter
         documents={allDocuments}
         subjects={allSubjects || activeSubjects || []}
-        pendingDocs={pendingDocs}
       />
     </div>
   );

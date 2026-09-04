@@ -1653,7 +1653,7 @@ export function FileExplorer({
   const showUpload = activeTab === "subjects" && currentSubjectId !== null;
 
   return (
-    <div className="win-explorer flex flex-col h-full w-full overflow-hidden border border-border/80 bg-background rounded-lg relative select-none">
+    <div className="win-explorer flex flex-col h-full w-full overflow-hidden bg-background relative select-none">
       
       {/* Loading Overlay */}
       {(isLoading || isPending || scaffolding) && (

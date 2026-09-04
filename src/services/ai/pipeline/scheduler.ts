@@ -676,9 +676,9 @@ export class AIJobScheduler {
         }
       }
 
-      // ── 8. Concurrent AI Asset Generation (Summary + Key Points) ─────────────
+      // ── 8. AI Asset Generation (Summary, followed by Key Points) ───────────
       this.logDisk('summaryGen', `[StageResume] document=${this.documentId} resume_from=summaryGen`, 'INFO');
-      this.logDisk('summaryGen', 'Concurrent AI Asset Generation Started (Summary + Key Points)', 'INFO');
+      this.logDisk('summaryGen', 'AI Summary Generation Started', 'INFO');
       this.updateStage('summaryGen', { status: 'processing', startTime: new Date().toISOString() });
 
       await this.saveProgress('Generating Study Pack');
@@ -687,33 +687,26 @@ export class AIJobScheduler {
         updated_at: new Date().toISOString()
       }).eq('document_id', this.documentId);
 
-      const aiGenStartMs = Date.now();
-
-      const [summarySettled, keyPointsSettled] = await Promise.allSettled([
-        SummarySkillService.run({
+      const summaryStartMs = Date.now();
+      let summaryResult: any = null;
+      try {
+        summaryResult = await SummarySkillService.run({
           documentId: this.documentId,
           userId: this.userId,
           mode: 'detailed',
           forceRegenerate: !!this.options.forceRun,
           supabase: this.supabase
-        }),
-        KeyPointsSkillService.run({
-          documentId: this.documentId,
-          userId: this.userId,
-          forceRegenerate: !!this.options.forceRun,
-          supabase: this.supabase
-        })
-      ]);
+        });
+      } catch (err: any) {
+        summaryResult = { success: false, errorMessage: err?.message };
+      }
 
-      const aiGenDurationMs = Date.now() - aiGenStartMs;
-      this.logDisk('summaryGen', `Concurrent AI generation finished in ${aiGenDurationMs}ms`, 'INFO');
-
-      const summaryResult = summarySettled.status === 'fulfilled' ? summarySettled.value : null;
-      const keyPointsResult = keyPointsSettled.status === 'fulfilled' ? keyPointsSettled.value : null;
+      const summaryDurationMs = Date.now() - summaryStartMs;
+      this.logDisk('summaryGen', `Summary generation finished in ${summaryDurationMs}ms`, 'INFO');
 
       // ── 8a. Validate and Persist Core Summary ──
       if (!summaryResult || !summaryResult.success || !summaryResult.summary) {
-        const errMsg = summaryResult?.errorMessage || (summarySettled.status === 'rejected' ? summarySettled.reason?.message : 'Summary generation returned an empty result.');
+        const errMsg = summaryResult?.errorMessage || 'Summary generation returned an empty result.';
         const isRateLimited = summaryResult?.errorCategory?.startsWith('rate_limit') || !!summaryResult?.cooldownUntil;
         const cooldownUntil = summaryResult?.cooldownUntil || (isRateLimited ? new Date(Date.now() + 60000).toISOString() : null);
 
@@ -723,7 +716,7 @@ export class AIJobScheduler {
         this.updateStage('summaryGen', {
           status: 'failed',
           endTime: new Date().toISOString(),
-          durationMs: aiGenDurationMs,
+          durationMs: summaryDurationMs,
           errorMessage: errMsg
         });
 
@@ -758,7 +751,7 @@ export class AIJobScheduler {
       this.updateStage('summaryGen', {
         status: 'completed',
         endTime: new Date().toISOString(),
-        durationMs: aiGenDurationMs
+        durationMs: summaryDurationMs
       });
 
       await this.supabase.from('document_knowledge').update({
@@ -776,12 +769,27 @@ export class AIJobScheduler {
         updated_at: new Date().toISOString()
       }).eq('id', this.documentId);
 
-      // ── 8b. Process Key Points Result (Independent Asset Preservation) ──
+      // ── 8b. Process Key Points (Sequential: depends on ready Summary) ──
+      this.logDisk('keyPointsGen', 'Key Points Generation Started', 'INFO');
+      const kpStartMs = Date.now();
+      let keyPointsResult: any = null;
+      try {
+        keyPointsResult = await KeyPointsSkillService.run({
+          documentId: this.documentId,
+          userId: this.userId,
+          forceRegenerate: !!this.options.forceRun,
+          supabase: this.supabase
+        });
+      } catch (err: any) {
+        keyPointsResult = { success: false, errorMessage: err?.message };
+      }
+      const kpDurationMs = Date.now() - kpStartMs;
+
       if (keyPointsResult && keyPointsResult.success) {
         if (keyPointsResult.cached) {
           this.logDisk('keyPointsGen', `[Idempotency] stage=keyPointsGen existing=true action=reuse`, 'INFO');
         }
-        this.logDisk('keyPointsGen', `Key Points Generated Successfully`, 'INFO');
+        this.logDisk('keyPointsGen', `Key Points Generated Successfully in ${kpDurationMs}ms`, 'INFO');
 
         // Save structured key-points.json in Supabase Storage for storage parity
         try {
@@ -802,7 +810,7 @@ export class AIJobScheduler {
           this.logDisk('keyPointsGen', `Saving key-points.json to storage warning: ${kpStoreErr?.message}`, 'WARN');
         }
       } else {
-        const kpErr = keyPointsResult?.errorMessage || (keyPointsSettled.status === 'rejected' ? keyPointsSettled.reason?.message : 'Bypassed');
+        const kpErr = keyPointsResult?.errorMessage || 'Unknown error';
         this.logDisk('keyPointsGen', `Key Points Generation bypassed/failed (non-fatal, summary preserved): ${kpErr}`, 'WARN');
       }
 

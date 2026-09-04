@@ -49,7 +49,6 @@ import {
   moveDocumentToRecycleBin, 
   checkDuplicateUploadAction,
   getSummaryFileLocationAction,
-  rejectOrCustomizeClassification,
 } from "@/actions/uploads";
 import { getSubjectFolders } from "@/actions/folders";
 import { Progress } from "@/components/ui/progress";
@@ -70,7 +69,7 @@ import { useSettingsStore } from "@/store/settings-store";
 import { classifyFile } from "@/services/ai/ai-classification";
 import { AIStudyPackDialog } from "./ai-study-pack-dialog";
 import { DuplicateUploadDialog } from "./duplicate-upload-dialog";
-import { ClassificationCard, ReviewDialog, type PendingDoc } from "@/components/shared/classification-card";
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -108,7 +107,6 @@ export interface DocumentRow {
 interface UploadCenterProps {
   documents: DocumentRow[];
   subjects: SubjectItem[];
-  pendingDocs?: PendingDoc[];
 }
 
 type QueueItemStatus =
@@ -116,7 +114,6 @@ type QueueItemStatus =
   | "uploading"
   | "classifying"
   | "success"
-  | "needs_review"
   | "duplicate"
   | "error";
 
@@ -138,7 +135,7 @@ interface UploadQueueItem {
     subjectName: string | null;
     folderName: string | null;
     confidence: number;
-    status: 'auto_applied' | 'needs_review';
+    status: string;
     method?: string;
   };
   duplicateInfo?: {
@@ -157,7 +154,7 @@ interface UploadQueueItem {
 type SortKey = "date" | "name" | "type" | "subject";
 type SortDir = "asc" | "desc";
 type FormatFilterKey = "all" | "pdf" | "docx" | "pptx" | "txt" | "image";
-type StatusFilterKey = "all" | "completed" | "processing" | "rate_limited" | "needs_review" | "failed" | "deleted";
+type StatusFilterKey = "all" | "completed" | "processing" | "rate_limited" | "failed" | "deleted";
 
 const ITEMS_PER_PAGE = 15;
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
@@ -247,11 +244,11 @@ function getStatusBadge(
     );
   }
 
-  if (classificationStatus === "needs_review" || classificationStatus === "pending") {
+  if (classificationStatus === "pending") {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 whitespace-nowrap">
         <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
-        Needs Review
+        Pending
       </span>
     );
   }
@@ -305,10 +302,8 @@ function isImageType(type: string | null | undefined) {
 
 function UploadStatisticsStrip({
   documents,
-  pendingCount,
 }: {
   documents: DocumentRow[];
-  pendingCount: number;
 }) {
   const totalCount = documents.length;
 
@@ -364,21 +359,14 @@ function UploadStatisticsStrip({
       </div>
 
       <div className="flex items-center gap-2.5 p-3 rounded-lg border border-border/60 bg-card/60">
-        <div
-          className={cn(
-            "h-8 w-8 rounded-md flex items-center justify-center shrink-0 border",
-            pendingCount > 0
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
-              : "bg-secondary border-border/40 text-muted-foreground"
-          )}
-        >
-          <Clock className="h-4 w-4" />
+        <div className="h-8 w-8 rounded-md bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+          <Trash2 className="h-4 w-4 text-red-500/70" />
         </div>
         <div className="min-w-0">
           <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">
-            Needs Review
+            Deleted
           </p>
-          <p className="text-sm font-semibold text-foreground">{pendingCount}</p>
+          <p className="text-sm font-semibold text-foreground">{documents.filter((d) => d.file_deleted).length}</p>
         </div>
       </div>
     </div>
@@ -459,38 +447,8 @@ function UploadArea({
     fileTypeLabel: string;
   } | null>(null);
 
-  const [reviewDocItem, setReviewDocItem] = useState<PendingDoc | null>(null);
-  const [isAssigning, startAssignTransition] = useTransition();
 
-  const handleReviewAssign = (
-    docId: string,
-    subjectName: string,
-    topic: string
-  ) => {
-    startAssignTransition(async () => {
-      try {
-        await rejectOrCustomizeClassification(docId, subjectName, topic);
-        setQueue((prev) =>
-          prev.map((q) =>
-            q.documentId === docId
-              ? {
-                  ...q,
-                  status: "success",
-                  destinationSubject: subjectName,
-                  destinationFolder: topic,
-                }
-              : q
-          )
-        );
-        setReviewDocItem(null);
-        onUploadComplete();
-      } catch (err) {
-        console.error("Failed to assign subject:", err);
-      }
-    });
-  };
-
-  // Synchronize queue items with incoming document changes (e.g. when confirmed via Needs Your Attention or real-time sync)
+  // Synchronize queue items with incoming document changes (e.g. real-time sync)
   useEffect(() => {
     if (!documents || documents.length === 0) return;
 
@@ -507,11 +465,10 @@ function UploadArea({
         const resolvedFolderName = matchedDoc.ai_topic || item.destinationFolder || "Lectures";
         const isConfirmed = Boolean(
           matchedDoc.subject_id &&
-          matchedDoc.classification_status !== "needs_review" &&
           matchedDoc.classification_status !== "pending"
         );
 
-        if (isConfirmed && (item.status === "needs_review" || item.destinationSubject !== resolvedSubjectName || item.destinationFolder !== resolvedFolderName)) {
+        if (isConfirmed && (item.destinationSubject !== resolvedSubjectName || item.destinationFolder !== resolvedFolderName)) {
           hasChanges = true;
           return {
             ...item,
@@ -774,7 +731,6 @@ function UploadArea({
           throw new Error(result.message || "Failed to save document metadata.");
         }
 
-        const isNeedsReview = result.classificationStatus === "needs_review";
         const destinationSubject = result.subjectName || null;
         const destinationFolder = result.labSubfolderName || result.folderName || null;
 
@@ -784,7 +740,7 @@ function UploadArea({
               ? {
                   ...q,
                   progress: 100,
-                  status: isNeedsReview ? "needs_review" : "success",
+                  status: "success",
                   documentId: result.documentId,
                   destinationSubject,
                   destinationFolder,
@@ -850,12 +806,12 @@ function UploadArea({
 
   const handleClearCompleted = () => {
     setQueue((prev) =>
-      prev.filter((q) => q.status !== "success" && q.status !== "needs_review")
+      prev.filter((q) => q.status !== "success")
     );
   };
 
   const hasCompletedItems = queue.some(
-    (q) => q.status === "success" || q.status === "needs_review"
+    (q) => q.status === "success"
   );
   const activeCount = queue.filter(
     (q) => q.status === "waiting" || q.status === "uploading" || q.status === "classifying"
@@ -1066,8 +1022,6 @@ function UploadArea({
                     "p-3 rounded-lg border text-xs transition-all duration-150 flex flex-col gap-2",
                     item.status === "success"
                       ? "bg-emerald-500/[0.04] border-emerald-500/20"
-                      : item.status === "needs_review"
-                      ? "bg-amber-500/[0.04] border-amber-500/20"
                       : item.status === "duplicate"
                       ? "bg-amber-500/[0.04] border-amber-500/30"
                       : item.status === "error"
@@ -1122,34 +1076,6 @@ function UploadArea({
                         </span>
                       )}
 
-                      {item.status === "needs_review" && (
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                            <AlertCircle className="h-3 w-3" />
-                            Needs confirmation
-                          </span>
-                          {item.documentId && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setReviewDocItem({
-                                  id: item.documentId!,
-                                  title: item.name,
-                                  ai_subject: item.destinationSubject || null,
-                                  ai_topic: item.destinationFolder || "Lectures",
-                                  ai_doc_type: item.type,
-                                  classification_confidence: item.classification?.confidence || 0.5,
-                                });
-                              }}
-                              className="h-6 text-[10px] px-2 py-0 rounded border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 cursor-pointer"
-                            >
-                              Review
-                            </Button>
-                          )}
-                        </div>
-                      )}
 
                       {item.status === "duplicate" && (
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1280,16 +1206,6 @@ function UploadArea({
         }}
       />
 
-      {reviewDocItem && (
-        <ReviewDialog
-          open={!!reviewDocItem}
-          onClose={() => setReviewDocItem(null)}
-          doc={reviewDocItem}
-          subjects={subjects}
-          onAssign={handleReviewAssign}
-          isPending={isAssigning}
-        />
-      )}
     </div>
   );
 }
@@ -1525,11 +1441,7 @@ function UploadHistorySection({
         const isProcessing =
           d.summary_status === "processing" || d.quiz_status === "processing";
         if (!isProcessing) return false;
-      } else if (statusFilter === "needs_review") {
-        const isNeedsReview =
-          d.classification_status === "needs_review" ||
-          d.classification_status === "pending";
-        if (!isNeedsReview) return false;
+
       } else if (statusFilter === "rate_limited") {
         const isRateLimited =
           d.summary_status === "rate_limited" ||
@@ -1774,8 +1686,6 @@ function UploadHistorySection({
                       ? "Completed"
                       : statusFilter === "processing"
                       ? "Processing"
-                      : statusFilter === "needs_review"
-                      ? "Needs Review"
                       : statusFilter === "failed"
                       ? "Failed"
                       : "File Deleted"}
@@ -1819,16 +1729,7 @@ function UploadHistorySection({
                 >
                   Processing
                 </DropdownMenuCheckboxItem>
-                <DropdownMenuCheckboxItem
-                  checked={statusFilter === "needs_review"}
-                  onCheckedChange={() => {
-                    setStatusFilter("needs_review");
-                    setPage(1);
-                  }}
-                  className="text-xs cursor-pointer"
-                >
-                  Needs Review
-                </DropdownMenuCheckboxItem>
+
                 <DropdownMenuCheckboxItem
                   checked={statusFilter === "failed"}
                   onCheckedChange={() => {
@@ -2449,7 +2350,6 @@ function UploadHistorySection({
 export function UploadCenter({
   documents,
   subjects,
-  pendingDocs = [],
 }: UploadCenterProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -2530,15 +2430,9 @@ export function UploadCenter({
       {/* 2. Lightweight Status / Statistics Overview */}
       <UploadStatisticsStrip
         documents={documents}
-        pendingCount={pendingDocs.length}
       />
 
-      {/* 3. Needs Your Attention (only when pending classification files exist) */}
-      {pendingDocs.length > 0 && (
-        <ClassificationCard pendingDocs={pendingDocs} subjects={subjects} />
-      )}
-
-      {/* 4. Upload History */}
+      {/* 3. Upload History */}
       <UploadHistorySection
         documents={documents}
         subjects={subjects}

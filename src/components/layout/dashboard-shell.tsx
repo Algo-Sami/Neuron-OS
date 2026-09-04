@@ -8,7 +8,7 @@ import { NavProgress } from "@/components/layout/nav-progress";
 import { ProfileCompletionModal } from "@/components/profile/profile-completion-modal";
 
 // Routes that need full-height, no-padding explorer mode
-const EXPLORER_ROUTES = ["/subjects", "/recycle-bin"];
+const EXPLORER_ROUTES = ["/subjects", "/recycle-bin", "/assistant"];
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
@@ -18,7 +18,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const isExplorerRoute = EXPLORER_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div
+      className="flex h-screen overflow-hidden bg-[#f8fafc] text-[#201f1e]"
+      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif' }}
+    >
       <Suspense fallback={null}>
         <NavProgress />
       </Suspense>
@@ -37,16 +40,16 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Main column — fills remaining space, never overflows */}
-      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
-        <TopNav />
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden bg-[#f8fafc]">
+        {pathname === "/dashboard" && <TopNav />}
         {isExplorerRoute ? (
           /* Full-height no-padding mode: for explorer pages */
-          <main className="flex-1 overflow-hidden flex flex-col min-h-0 bg-muted/20">
+          <main className="flex-1 overflow-hidden flex flex-col min-h-0 bg-[#f8fafc]">
             {children}
           </main>
         ) : (
           /* Standard padded scrollable mode: for all other pages */
-          <main className="flex-1 overflow-y-auto bg-muted/20">
+          <main className="flex-1 overflow-y-auto bg-[#f8fafc]">
             <div className="mx-auto max-w-6xl p-6">
               {children}
             </div>
