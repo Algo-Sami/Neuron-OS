@@ -4,6 +4,9 @@ import {
   getDynamicActivityStats, 
   DEFAULT_ACHIEVEMENTS
 } from "@/services/gamification/rewards";
+import { getISOWeekStartDate } from "@/services/gamification/weekly-scores";
+import { getCohortLeaderboard } from "@/actions/leaderboard";
+import { getCohortSharedFiles, CohortSharedFile } from "@/actions/sharing";
 import { LeaderboardClient } from "@/components/gamification/leaderboard-client";
 import { redirect } from "next/navigation";
 
@@ -77,7 +80,7 @@ export default async function LeaderboardPage() {
   const [profileResult, progressResult, activityStats] = await Promise.all([
     supabase
       .from("profiles")
-      .select("first_name, last_name, university, major")
+      .select("first_name, last_name, university, major, cohort_id, leaderboard_visibility")
       .eq("id", user.id)
       .single(),
     supabase
@@ -181,6 +184,44 @@ export default async function LeaderboardPage() {
   const seasonEndDate = nextMonth.toISOString();
   const completedDocs = completedDocsResult.data;
 
+  // ─── BATCH 3: Cohort Information, Initial Cohort Leaderboard & Shared Notes ──
+  const currentWeekStart = getISOWeekStartDate();
+  let cohortInfo: { id: string; name: string; semester: string } | null = null;
+  let initialCohortLeaderboard: any = null;
+  let initialSharedFiles: CohortSharedFile[] = [];
+
+  if (profile?.cohort_id) {
+    const [cohortRes, leaderboardRes, sharedFilesRes] = await Promise.all([
+      supabase
+        .from("cohorts")
+        .select(`
+          id,
+          semester,
+          universities:university_id ( name ),
+          degree_programs:program_id ( name )
+        `)
+        .eq("id", profile.cohort_id)
+        .maybeSingle(),
+      getCohortLeaderboard(profile.cohort_id, currentWeekStart),
+      getCohortSharedFiles(profile.cohort_id),
+    ]);
+
+    const cRow = cohortRes.data;
+    if (cRow) {
+      const uName = (Array.isArray(cRow.universities) ? cRow.universities[0]?.name : (cRow.universities as any)?.name) || profile.university || "University";
+      const pName = (Array.isArray(cRow.degree_programs) ? cRow.degree_programs[0]?.name : (cRow.degree_programs as any)?.name) || profile.major || "Program";
+      cohortInfo = {
+        id: cRow.id,
+        name: `${uName} • ${pName} • ${cRow.semester}`,
+        semester: cRow.semester,
+      };
+    }
+    initialCohortLeaderboard = leaderboardRes;
+    if (sharedFilesRes?.success && sharedFilesRes.data) {
+      initialSharedFiles = sharedFilesRes.data;
+    }
+  }
+
   return (
     <LeaderboardClient
       initialProgress={userProgress}
@@ -191,6 +232,10 @@ export default async function LeaderboardPage() {
       championsArchive={championsArchive}
       seasonEndDate={seasonEndDate}
       completedDocs={completedDocs || []}
+      initialCohortLeaderboard={initialCohortLeaderboard}
+      initialSharedFiles={initialSharedFiles}
+      cohortInfo={cohortInfo}
+      currentWeekStart={currentWeekStart}
     />
   );
 }

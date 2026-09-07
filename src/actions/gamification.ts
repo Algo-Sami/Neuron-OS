@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { awardXP } from "@/services/gamification/rewards";
+import { incrementWeeklyScore } from "@/services/gamification/weekly-scores";
 import { revalidatePath } from "next/cache";
 
 export async function dailyCheckIn() {
@@ -17,6 +18,9 @@ export async function dailyCheckIn() {
   if (!result.success || (result as any).alreadyCheckedIn) {
     return { success: false, message: "Already checked in today!" };
   }
+
+  // Phase 3: increment weekly competition score (streak_day)
+  await incrementWeeklyScore(user.id, "streak_day");
 
   revalidatePath("/leaderboard");
   revalidatePath("/dashboard");
@@ -90,6 +94,9 @@ export async function completeQuickQuiz(score: number, totalQuestions: number) {
   // Award XP
   const result = await awardXP(user.id, "complete_quiz", { score, totalQuestions });
 
+  // Phase 3: increment weekly competition score (quiz_completed)
+  await incrementWeeklyScore(user.id, "quiz_completed");
+
   revalidatePath("/leaderboard");
   revalidatePath("/dashboard");
   revalidatePath("/profile");
@@ -109,7 +116,7 @@ export async function shareMaterials() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // Award XP
+  // Award XP (lifetime XP preserved, weekly competition score unaffected)
   const result = await awardXP(user.id, "share_material");
 
   revalidatePath("/leaderboard");

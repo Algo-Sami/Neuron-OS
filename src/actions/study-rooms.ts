@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { awardXP } from "@/services/gamification/rewards";
+import { incrementWeeklyScore } from "@/services/gamification/weekly-scores";
 import { logger } from "@/lib/logger";
 import { generateQuizFromText } from "@/services/ai/gemini";
 import { summarizeRoomDiscussion, explainRoomTopic } from "@/services/ai/study-rooms-ai";
@@ -532,6 +533,9 @@ export async function submitRoomQuizAnswersAction(
 
     // Award XP
     await awardXP(userId, "complete_quiz", { score, totalQuestions });
+
+    // Phase 3: increment weekly competition score (quiz_completed)
+    await incrementWeeklyScore(userId, "quiz_completed");
 
     return { success: true, attempt };
   } catch (error: unknown) {

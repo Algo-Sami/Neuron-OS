@@ -24,13 +24,30 @@ import {
   Shield,
   Timer,
   ChevronRight,
+  ChevronLeft,
+  GraduationCap,
+  ExternalLink,
   Users,
-  Lock
+  Lock,
+  Flag,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { dailyCheckIn, logStudySession, shareMaterials } from "@/actions/gamification";
 import { getRankName } from "@/services/gamification/helpers";
+import { getCohortLeaderboard, CohortLeaderboardResponse, CohortLeaderboardEntry } from "@/actions/leaderboard";
+import { reportSharedFile, unshareDocument, getCohortSharedFiles, type CohortSharedFile } from "@/actions/sharing";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 interface Achievement {
   id: string;
@@ -95,6 +112,14 @@ interface LeaderboardClientProps {
   championsArchive: ChampionArchiveEntry[];
   seasonEndDate: string;
   completedDocs: { id: string; title: string }[];
+  initialCohortLeaderboard?: CohortLeaderboardResponse | null;
+  cohortInfo?: {
+    id: string;
+    name: string;
+    semester: string;
+  } | null;
+  initialSharedFiles?: CohortSharedFile[];
+  currentWeekStart?: string;
 }
 
 /** Returns the timestamp (ms) when the user last completed the daily gamified quiz, or null if never / older than 24 h. */
@@ -133,6 +158,332 @@ const formatMsCountdown = (ms: number): string => {
   return `${s}s`;
 };
 
+function ReportDialog({
+  file,
+  isOpen,
+  onClose,
+  onReportSuccess,
+}: {
+  file: CohortSharedFile | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onReportSuccess: (fileId: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState(false);
+
+  if (!file) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = reason.trim();
+    if (trimmed.length < 3) {
+      setErrorMsg("Please provide a reason with at least 3 characters.");
+      return;
+    }
+    if (trimmed.length > 500) {
+      setErrorMsg("Reason cannot exceed 500 characters.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+
+    try {
+      const res = await reportSharedFile(file.id, trimmed);
+      if (!res.success) {
+        setErrorMsg(res.error || "Failed to submit report.");
+        return;
+      }
+      setSuccessMsg(true);
+      setTimeout(() => {
+        onReportSuccess(file.id);
+        onClose();
+        setSuccessMsg(false);
+        setReason("");
+      }, 1500);
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to submit report.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md bg-card border border-border/70 shadow-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <Flag className="h-4 w-4 text-destructive" />
+            Report Shared Material
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Flag <span className="font-medium text-foreground">{file.title}</span> for review (e.g. copyright violation, inappropriate content).
+          </DialogDescription>
+        </DialogHeader>
+
+        {successMsg ? (
+          <div className="py-6 text-center space-y-2">
+            <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto" />
+            <p className="text-xs font-semibold text-foreground">Report Submitted</p>
+            <p className="text-[11px] text-muted-foreground">Thank you for helping keep our learning community safe.</p>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3 pt-2">
+            <div>
+              <label htmlFor="report-reason" className="block text-xs font-medium text-foreground mb-1">
+                Reason for report
+              </label>
+              <textarea
+                id="report-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Explain why this content violates policy (3-500 characters)..."
+                maxLength={500}
+                rows={4}
+                className="w-full text-xs rounded-lg border border-border/80 bg-background/80 p-2.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                <span>Min 3 chars</span>
+                <span>{reason.length}/500</span>
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive flex items-start gap-2">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            <DialogFooter className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                disabled={isSubmitting}
+                className="h-8 text-xs cursor-pointer"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="destructive"
+                size="sm"
+                disabled={isSubmitting || reason.trim().length < 3}
+                className="h-8 text-xs gap-1.5 cursor-pointer"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Submitting…
+                  </>
+                ) : (
+                  <>
+                    <Flag className="h-3.5 w-3.5" />
+                    Submit Report
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CohortNotesPanel({
+  cohortInfo,
+  sharedFiles,
+  onRefresh,
+}: {
+  cohortInfo?: { id: string; name: string; semester: string } | null;
+  sharedFiles: CohortSharedFile[];
+  onRefresh: () => void;
+}) {
+  const [reportingFile, setReportingFile] = useState<CohortSharedFile | null>(null);
+  const [unsharingId, setUnsharingId] = useState<string | null>(null);
+
+  if (!cohortInfo?.id) {
+    return (
+      <div className="text-center py-12 px-4 space-y-3">
+        <div className="mx-auto h-12 w-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+          <BookOpen className="h-6 w-6" />
+        </div>
+        <h4 className="text-sm font-bold text-foreground">No Cohort Assigned</h4>
+        <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+          Join a cohort by setting your University, Degree Program, and Year in your profile to view shared notes and study materials from your classmates.
+        </p>
+        <Link href="/profile">
+          <Button size="sm" className="h-8 text-xs font-semibold mt-2">
+            Update Profile
+          </Button>
+        </Link>
+      </div>
+    );
+  }
+
+  const handleUnshare = async (docId: string) => {
+    try {
+      setUnsharingId(docId);
+      const res = await unshareDocument(docId);
+      if (res.success) {
+        onRefresh();
+      } else {
+        alert(res.error || "Failed to unshare document");
+      }
+    } finally {
+      setUnsharingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4 pt-1">
+      {/* Cohort Header Info */}
+      <div className="flex items-center justify-between flex-wrap gap-2 px-1">
+        <div>
+          <p className="text-xs font-semibold text-foreground">{cohortInfo.name}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {sharedFiles.length} file{sharedFiles.length !== 1 ? "s" : ""} shared with your cohort
+          </p>
+        </div>
+        <Link href="/uploads">
+          <Button variant="outline" size="sm" className="h-7 text-[11px] font-semibold gap-1.5 cursor-pointer">
+            <Share2 className="h-3 w-3 text-primary" />
+            Share Your Notes
+          </Button>
+        </Link>
+      </div>
+
+      {sharedFiles.length === 0 ? (
+        <div className="text-center py-10 px-4 border border-dashed border-border/70 rounded-2xl bg-muted/10 space-y-3">
+          <div className="mx-auto h-10 w-10 rounded-xl bg-muted/40 border border-border/60 flex items-center justify-center text-muted-foreground">
+            <BookOpen className="h-5 w-5" />
+          </div>
+          <div className="space-y-1">
+            <h4 className="text-xs font-bold text-foreground">No Class Notes Shared Yet</h4>
+            <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+              Be the first to share study materials with your classmates! Share any uploaded document from your Uploads page.
+            </p>
+          </div>
+          <Link href="/uploads">
+            <Button size="sm" variant="outline" className="h-7 text-xs font-medium cursor-pointer">
+              Go to Uploads
+            </Button>
+          </Link>
+        </div>
+      ) : (
+        <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+          {sharedFiles.map((file) => {
+            const rawExt = (file.file_type || "").toLowerCase();
+            const isUnsharing = unsharingId === file.id;
+
+            return (
+              <div
+                key={file.id}
+                className="flex items-center justify-between p-3 rounded-2xl border border-border/50 bg-card/40 hover:bg-muted/20 transition-all gap-3"
+              >
+                {/* File Icon & Meta */}
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={cn(
+                      "h-9 w-9 rounded-xl flex items-center justify-center shrink-0 border",
+                      rawExt === "pdf"
+                        ? "bg-rose-500/10 text-rose-500 border-rose-500/20"
+                        : rawExt === "docx" || rawExt === "doc"
+                        ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                        : rawExt === "pptx" || rawExt === "ppt"
+                        ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                        : "bg-primary/10 text-primary border-primary/20"
+                    )}
+                  >
+                    <FileText className="h-4 w-4" />
+                  </div>
+
+                  <div className="min-w-0 text-left">
+                    <p className="text-xs font-bold text-foreground truncate max-w-[220px] sm:max-w-[320px]" title={file.title}>
+                      {file.title}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
+                      <span className="font-medium text-foreground/80">{file.author_name}</span>
+                      <span>·</span>
+                      <span className="uppercase font-semibold text-[9px]">{file.file_type}</span>
+                      {file.size ? (
+                        <>
+                          <span>·</span>
+                          <span>{(file.size / (1024 * 1024)).toFixed(1)} MB</span>
+                        </>
+                      ) : null}
+                      {file.is_owner && (
+                        <>
+                          <span>·</span>
+                          <span className="text-[9px] font-bold text-primary bg-primary/10 px-1 rounded">You</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    size="sm"
+                    className="h-7 px-2.5 text-xs font-semibold gap-1 bg-primary hover:bg-primary/90 text-primary-foreground cursor-pointer"
+                    onClick={() => {
+                      if (file.download_url) {
+                        window.open(file.download_url, "_blank", "noopener,noreferrer");
+                      }
+                    }}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    <span className="hidden sm:inline">Open / Download</span>
+                  </Button>
+
+                  {file.is_owner ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isUnsharing}
+                      className="h-7 px-2 text-[11px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                      onClick={() => handleUnshare(file.id)}
+                    >
+                      {isUnsharing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Unshare"}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+                      title="Report file"
+                      onClick={() => setReportingFile(file)}
+                    >
+                      <Flag className="h-3 w-3" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Report Dialog */}
+      <ReportDialog
+        file={reportingFile}
+        isOpen={Boolean(reportingFile)}
+        onClose={() => setReportingFile(null)}
+        onReportSuccess={() => {
+          onRefresh();
+        }}
+      />
+    </div>
+  );
+}
+
 export function LeaderboardClient({
   initialProgress,
   achievements,
@@ -141,14 +492,93 @@ export function LeaderboardClient({
   leaderboardList,
   championsArchive,
   seasonEndDate,
-  completedDocs
+  completedDocs,
+  initialCohortLeaderboard,
+  cohortInfo,
+  initialSharedFiles,
+  currentWeekStart = new Date().toISOString().split('T')[0]
 }: LeaderboardClientProps) {
   // Global XP & Level States
   const [xp, setXp] = useState(initialProgress.total_xp);
   const [level, setLevel] = useState(initialProgress.current_level);
   const [monthlyXp, setMonthlyXp] = useState(initialProgress.monthly_xp);
   const [lastCheckInDate, setLastCheckInDate] = useState(initialProgress.last_check_in_date);
+  const [sharedFiles, setSharedFiles] = useState<CohortSharedFile[]>(initialSharedFiles || []);
   
+  // Leaderboard scope: defaults to cohort weekly if user has a cohort, otherwise global
+  const [leaderboardScope, setLeaderboardScope] = useState<"cohort" | "global" | "notes">(() =>
+    cohortInfo?.id ? "cohort" : "global"
+  );
+
+  const handleRefreshSharedFiles = async () => {
+    if (!cohortInfo?.id) return;
+    const res = await getCohortSharedFiles(cohortInfo.id);
+    if (res.success && res.data) {
+      setSharedFiles(res.data);
+    }
+  };
+
+  // Cohort weekly states
+  const [selectedWeekStart, setSelectedWeekStart] = useState<string>(
+    currentWeekStart || new Date().toISOString().split("T")[0]
+  );
+  const [cohortData, setCohortData] = useState<CohortLeaderboardResponse | null>(
+    initialCohortLeaderboard || null
+  );
+  const [cohortLoading, setCohortLoading] = useState<boolean>(false);
+
+  // Helper to compute available past weeks (up to 4 weeks back)
+  const getPastWeeks = (currentMonday: string, count = 4): string[] => {
+    const weeks: string[] = [];
+    const base = new Date(currentMonday + "T00:00:00Z");
+    for (let i = 0; i < count; i++) {
+      const d = new Date(base);
+      d.setUTCDate(d.getUTCDate() - i * 7);
+      weeks.push(d.toISOString().split("T")[0]);
+    }
+    return weeks;
+  };
+
+  const availableWeeks = getPastWeeks(currentWeekStart || new Date().toISOString().split("T")[0], 4);
+  const currentWeekIdx = availableWeeks.indexOf(selectedWeekStart);
+  const canGoPrevious = currentWeekIdx < availableWeeks.length - 1;
+  const canGoNext = currentWeekIdx > 0;
+
+  const handleWeekChange = async (targetWeek: string) => {
+    if (!cohortInfo?.id || targetWeek === selectedWeekStart) return;
+    setCohortLoading(true);
+    setSelectedWeekStart(targetWeek);
+    try {
+      const res = await getCohortLeaderboard(cohortInfo.id, targetWeek);
+      setCohortData(res);
+    } catch (err) {
+      console.error("Failed to load week scores:", err);
+    } finally {
+      setCohortLoading(false);
+    }
+  };
+
+  const handlePrevWeek = () => {
+    if (canGoPrevious) handleWeekChange(availableWeeks[currentWeekIdx + 1]);
+  };
+
+  const handleNextWeek = () => {
+    if (canGoNext) handleWeekChange(availableWeeks[currentWeekIdx - 1]);
+  };
+
+  const formatWeekRange = (mondayStr: string): string => {
+    const monday = new Date(mondayStr + "T00:00:00Z");
+    const sunday = new Date(monday);
+    sunday.setUTCDate(sunday.getUTCDate() + 6);
+    const mMonth = monday.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+    const sMonth = sunday.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+    const isCur = mondayStr === (currentWeekStart || new Date().toISOString().split("T")[0]);
+    if (mMonth === sMonth) {
+      return `${mMonth} ${monday.getUTCDate()} – ${sunday.getUTCDate()}${isCur ? " (This Week)" : ""}`;
+    }
+    return `${mMonth} ${monday.getUTCDate()} – ${sMonth} ${sunday.getUTCDate()}${isCur ? " (This Week)" : ""}`;
+  };
+
   // Leaderboard lists toggling (Monthly Season vs. Lifetime)
   const [rankingTab, setRankingTab] = useState<"monthly" | "lifetime">("monthly");
   
@@ -953,159 +1383,428 @@ export function LeaderboardClient({
       </div>
 
       {/* Main Leaderboard & Podiums Archive row */}
-      <div className="grid gap-6 md:grid-cols-5">
-
-        {/* Dynamic Podium, Toggles, and Real Registered Users List */}
+      <div className="grid gap-6 md:grid-cols-4">
+        {/* Dynamic Podium, Toggles, and Standings List (Cohort Weekly Default + Global Platform) */}
         <Card className="glass-panel border-border/60 rounded-3xl md:col-span-3 shadow-md flex flex-col">
           <CardHeader className="pb-3 border-b border-border/20 flex flex-row items-center justify-between flex-wrap gap-3">
             <div>
               <CardTitle className="text-md font-bold tracking-tight text-muted-foreground flex items-center gap-2">
-                <Users className="h-4.5 w-4.5 text-yellow-400" /> Platform Registered Standings
+                {leaderboardScope === "cohort" ? (
+                  <>
+                    <Users className="h-4.5 w-4.5 text-primary" /> My Cohort Standings
+                  </>
+                ) : leaderboardScope === "notes" ? (
+                  <>
+                    <BookOpen className="h-4.5 w-4.5 text-emerald-500" /> Class Notes & Shared Materials
+                  </>
+                ) : (
+                  <>
+                    <Trophy className="h-4.5 w-4.5 text-yellow-400" /> Platform Registered Standings
+                  </>
+                )}
               </CardTitle>
             </div>
             
-            {/* Toggles tabs */}
-            <div className="flex bg-muted/60 p-1 border rounded-xl">
-              <button 
-                onClick={() => setRankingTab("monthly")}
-                className={`text-[10px] font-extrabold px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                  rankingTab === "monthly" ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Monthly Season
-              </button>
-              <button 
-                onClick={() => setRankingTab("lifetime")}
-                className={`text-[10px] font-extrabold px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                  rankingTab === "lifetime" ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Lifetime XP
-              </button>
+            {/* Toggles: Scope Switcher & Sub-toggles */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Scope Switcher: Cohort Weekly vs Class Notes vs Global Platform */}
+              <div className="flex bg-muted/60 p-1 border rounded-xl">
+                <button 
+                  onClick={() => setLeaderboardScope("cohort")}
+                  className={`text-[10px] font-extrabold px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    leaderboardScope === "cohort" ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Users className="h-3 w-3 text-primary" />
+                  Cohort Weekly
+                </button>
+                <button 
+                  onClick={() => setLeaderboardScope("notes")}
+                  className={`text-[10px] font-extrabold px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    leaderboardScope === "notes" ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <BookOpen className="h-3 w-3 text-emerald-500" />
+                  Class Notes
+                </button>
+                <button 
+                  onClick={() => setLeaderboardScope("global")}
+                  className={`text-[10px] font-extrabold px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                    leaderboardScope === "global" ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Trophy className="h-3 w-3 text-yellow-500" />
+                  Global Platform
+                </button>
+              </div>
+
+              {/* Sub-toggles for Global Platform mode */}
+              {leaderboardScope === "global" && (
+                <div className="flex bg-muted/60 p-1 border rounded-xl">
+                  <button 
+                    onClick={() => setRankingTab("monthly")}
+                    className={`text-[10px] font-extrabold px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                      rankingTab === "monthly" ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Monthly Season
+                  </button>
+                  <button 
+                    onClick={() => setRankingTab("lifetime")}
+                    className={`text-[10px] font-extrabold px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                      rankingTab === "lifetime" ? 'bg-card text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Lifetime XP
+                  </button>
+                </div>
+              )}
             </div>
           </CardHeader>
           <CardContent className="py-5 flex-1 flex flex-col gap-6">
-            
-            {/* 1. TOP 3 PODIUM VISUAL HIGHLIGHTS */}
-            <div className="grid grid-cols-3 gap-3 items-end pt-4 pb-2 border-b border-border/40 max-w-md mx-auto w-full">
-              
-              {/* 2ND RANK (Silver, left) */}
-              {podiumUsers[1] ? (
-                <div className="flex flex-col items-center">
-                  <div className="relative flex items-center justify-center">
-                    <div className="h-13 w-13 rounded-full bg-gradient-to-br from-zinc-200 to-zinc-400 border-2 border-zinc-300 flex items-center justify-center font-extrabold text-[12px] text-zinc-700 shrink-0 shadow-md">
-                      {podiumUsers[1].first_name[0]}{podiumUsers[1].last_name[0]}
-                    </div>
-                    <span className="absolute -bottom-1 h-5 w-5 rounded-full bg-zinc-400 border border-zinc-200 text-white font-black text-[9px] flex items-center justify-center shadow-sm">2</span>
+
+            {/* COHORT WEEKLY VIEW (Default) */}
+            {leaderboardScope === "cohort" ? (
+              <div className="space-y-6">
+                {/* Cohort Info Banner & Week Navigation */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/30 pb-3">
+                  <div>
+                    <h3 className="text-xs font-black text-foreground flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"></span>
+                      <span className="truncate">{cohortInfo?.name || "Cohort Standings"}</span>
+                    </h3>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Weekly competition • Winner receives AI & storage tier boosts
+                    </p>
                   </div>
-                  <p className="text-[10px] font-black text-foreground text-center truncate w-full mt-2 leading-none">
-                    {podiumUsers[1].first_name}
-                  </p>
-                  <p className="text-[9px] font-black text-zinc-400 mt-1 uppercase">
-                    {rankingTab === "monthly" ? podiumUsers[1].monthly_xp : podiumUsers[1].total_xp} XP
-                  </p>
-                </div>
-              ) : (
-                <div className="opacity-0"></div>
-              )}
 
-              {/* 1ST RANK (Gold, center) */}
-              {podiumUsers[0] ? (
-                <div className="flex flex-col items-center transform -translate-y-2">
-                  <div className="relative flex items-center justify-center">
-                    <div className="absolute -top-3.5 text-yellow-400 animate-bounce">👑</div>
-                    <div className="h-16 w-16 rounded-full bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 border-3 border-yellow-400 flex items-center justify-center font-black text-[14px] text-yellow-950 shrink-0 shadow-lg shadow-yellow-500/20">
-                      {podiumUsers[0].first_name[0]}{podiumUsers[0].last_name[0]}
-                    </div>
-                    <span className="absolute -bottom-1.5 h-6 w-6 rounded-full bg-yellow-400 border-2 border-yellow-200 text-yellow-950 font-black text-[10px] flex items-center justify-center shadow-sm">1</span>
-                  </div>
-                  <p className="text-xs font-black text-foreground text-center truncate w-full mt-2.5 leading-none">
-                    {podiumUsers[0].first_name}
-                  </p>
-                  <p className="text-[10px] font-black text-yellow-500 mt-1 uppercase">
-                    {rankingTab === "monthly" ? podiumUsers[0].monthly_xp : podiumUsers[0].total_xp} XP
-                  </p>
-                </div>
-              ) : (
-                <div className="opacity-0"></div>
-              )}
-
-              {/* 3RD RANK (Bronze, right) */}
-              {podiumUsers[2] ? (
-                <div className="flex flex-col items-center">
-                  <div className="relative flex items-center justify-center">
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-600 to-orange-700 border-2 border-orange-600 flex items-center justify-center font-extrabold text-[11px] text-amber-100 shrink-0 shadow-md">
-                      {podiumUsers[2].first_name[0]}{podiumUsers[2].last_name[0]}
-                    </div>
-                    <span className="absolute -bottom-1 h-5 w-5 rounded-full bg-orange-700 border border-orange-500 text-white font-black text-[9px] flex items-center justify-center shadow-sm">3</span>
-                  </div>
-                  <p className="text-[10px] font-black text-foreground text-center truncate w-full mt-2 leading-none">
-                    {podiumUsers[2].first_name}
-                  </p>
-                  <p className="text-[9px] font-black text-orange-600 mt-1 uppercase">
-                    {rankingTab === "monthly" ? podiumUsers[2].monthly_xp : podiumUsers[2].total_xp} XP
-                  </p>
-                </div>
-              ) : (
-                <div className="opacity-0"></div>
-              )}
-
-            </div>
-
-            {/* 2. REAL DB USERS LIST */}
-            <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
-              {/* Renders Top 3 in list too, or rest of list depending on layout. Showing entire sorted array is best so all real entries display with ranks! */}
-              {activeLeaderboard.map((competitor, idx) => {
-                const isCurrentUser = competitor.user_id === initialProgress.user_id;
-                const score = rankingTab === "monthly" ? competitor.monthly_xp : competitor.total_xp;
-                
-                const initials = `${competitor.first_name?.[0] || 'S'}${competitor.last_name?.[0] || 'N'}`;
-                const name = `${competitor.first_name} ${competitor.last_name}`;
-
-                const rankColor = idx === 0 
-                  ? "bg-yellow-400/10 text-yellow-500 border-yellow-400/25 font-black" 
-                  : idx === 1 
-                  ? "bg-zinc-300/10 text-zinc-400 border-zinc-300/25 font-black"
-                  : idx === 2
-                  ? "bg-amber-600/10 text-amber-600 border-amber-600/25 font-black"
-                  : "bg-muted text-muted-foreground border-border/60 font-bold";
-
-                return (
-                  <div 
-                    key={competitor.user_id}
-                    className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all ${
-                      isCurrentUser 
-                        ? 'border-primary bg-primary/5 shadow-xs' 
-                        : 'border-border/50 bg-card/25 hover:bg-muted/20'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={`h-6 w-6 text-center text-xs flex items-center justify-center rounded-lg border shrink-0 ${rankColor}`}>
-                        {idx + 1}
+                  {cohortInfo?.id && (
+                    <div className="flex items-center gap-1 bg-muted/40 border border-border/60 p-1 rounded-xl shrink-0 self-start sm:self-auto">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!canGoPrevious || cohortLoading}
+                        onClick={handlePrevWeek}
+                        className="h-7 w-7 p-0 rounded-lg cursor-pointer"
+                        title="Previous Week"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </Button>
+                      <span className="text-[11px] font-bold px-2 text-foreground font-mono">
+                        {formatWeekRange(selectedWeekStart)}
                       </span>
-                      
-                      <div className="h-8.5 w-8.5 rounded-full bg-gradient-to-br from-primary/10 to-indigo-500/10 border border-primary/20 flex items-center justify-center font-extrabold text-[11px] text-primary shrink-0">
-                        {initials}
-                      </div>
-                      
-                      <div className="min-w-0 text-left">
-                        <p className={`text-xs font-black truncate leading-tight ${isCurrentUser ? 'text-primary' : 'text-foreground'}`}>
-                          {name}
-                        </p>
-                        <p className="text-[9px] text-muted-foreground uppercase leading-none mt-0.5 truncate">
-                          Level {competitor.current_level} • Accuracy: {competitor.quiz_accuracy}% • {getRankName(competitor.current_level).split(" ")[0]}
-                        </p>
-                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!canGoNext || cohortLoading}
+                        onClick={handleNextWeek}
+                        className="h-7 w-7 p-0 rounded-lg cursor-pointer"
+                        title="Next Week"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* No Cohort Assigned Fallback */}
+                {!cohortInfo?.id ? (
+                  <div className="p-8 text-center bg-muted/20 border border-dashed border-border/80 rounded-2xl space-y-3 my-4">
+                    <div className="h-10 w-10 mx-auto rounded-full bg-primary/10 text-primary flex items-center justify-center">
+                      <GraduationCap className="h-5 w-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-bold text-foreground">No Cohort Assigned Yet</h4>
+                      <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                        Set your university, degree program, and semester in your profile to automatically join your classmates on the weekly cohort leaderboard!
+                      </p>
+                    </div>
+                    <Link href="/profile">
+                      <Button size="sm" className="rounded-xl text-xs font-bold gap-1.5 mt-2">
+                        Configure Profile <ExternalLink className="h-3.5 w-3.5" />
+                      </Button>
+                    </Link>
+                  </div>
+                ) : cohortLoading ? (
+                  <div className="py-16 text-center text-muted-foreground text-xs animate-pulse">
+                    Loading weekly cohort scores...
+                  </div>
+                ) : (cohortData?.entries || []).length === 0 ? (
+                  <div className="p-8 text-center bg-muted/20 border border-border/40 rounded-2xl space-y-2 my-4">
+                    <p className="text-xs font-bold text-foreground">No scores recorded for this week yet.</p>
+                    <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                      Complete a daily quiz, streak check-in, or share notes to claim the #1 spot in your cohort!
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Cohort Weekly Top 3 Podium */}
+                    <div className="grid grid-cols-3 gap-3 items-end pt-2 pb-2 border-b border-border/40 max-w-md mx-auto w-full">
+                      {/* 2ND RANK (Silver, left) */}
+                      {cohortData!.entries[1] ? (
+                        <div className="flex flex-col items-center">
+                          <div className="relative flex items-center justify-center">
+                            <div className="h-13 w-13 rounded-full bg-gradient-to-br from-zinc-200 to-zinc-400 border-2 border-zinc-300 flex items-center justify-center font-extrabold text-[12px] text-zinc-700 shrink-0 shadow-md">
+                              {cohortData!.entries[1].first_name[0]}{cohortData!.entries[1].last_name[0]}
+                            </div>
+                            <span className="absolute -bottom-1 h-5 w-5 rounded-full bg-zinc-400 border border-zinc-200 text-white font-black text-[9px] flex items-center justify-center shadow-sm">
+                              {cohortData!.entries[1].rank}
+                            </span>
+                          </div>
+                          <p className="text-[10px] font-black text-foreground text-center truncate w-full mt-2 leading-none">
+                            {cohortData!.entries[1].first_name}
+                          </p>
+                          <p className="text-[9px] font-black text-zinc-400 mt-1 uppercase">
+                            {cohortData!.entries[1].score} pts
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="opacity-0"></div>
+                      )}
+
+                      {/* 1ST RANK (Gold, center) */}
+                      {cohortData!.entries[0] ? (
+                        <div className="flex flex-col items-center transform -translate-y-2">
+                          <div className="relative flex items-center justify-center">
+                            <div className="absolute -top-3.5 text-yellow-400 animate-bounce">👑</div>
+                            <div className="h-16 w-16 rounded-full bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 border-3 border-yellow-400 flex items-center justify-center font-black text-[14px] text-yellow-950 shrink-0 shadow-lg shadow-yellow-500/20">
+                              {cohortData!.entries[0].first_name[0]}{cohortData!.entries[0].last_name[0]}
+                            </div>
+                            <span className="absolute -bottom-1.5 h-6 w-6 rounded-full bg-yellow-400 border-2 border-yellow-200 text-yellow-950 font-black text-[10px] flex items-center justify-center shadow-sm">
+                              {cohortData!.entries[0].rank}
+                            </span>
+                          </div>
+                          <p className="text-xs font-black text-foreground text-center truncate w-full mt-2.5 leading-none">
+                            {cohortData!.entries[0].first_name}
+                          </p>
+                          <p className="text-[10px] font-black text-yellow-500 mt-1 uppercase">
+                            {cohortData!.entries[0].score} pts
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="opacity-0"></div>
+                      )}
+
+                      {/* 3RD RANK (Bronze, right) */}
+                      {cohortData!.entries[2] ? (
+                        <div className="flex flex-col items-center">
+                          <div className="relative flex items-center justify-center">
+                            <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-600 to-orange-700 border-2 border-orange-600 flex items-center justify-center font-extrabold text-[11px] text-amber-100 shrink-0 shadow-md">
+                              {cohortData!.entries[2].first_name[0]}{cohortData!.entries[2].last_name[0]}
+                            </div>
+                            <span className="absolute -bottom-1 h-5 w-5 rounded-full bg-orange-700 border border-orange-500 text-white font-black text-[9px] flex items-center justify-center shadow-sm">
+                              {cohortData!.entries[2].rank}
+                            </span>
+                          </div>
+                          <p className="text-[10px] font-black text-foreground text-center truncate w-full mt-2 leading-none">
+                            {cohortData!.entries[2].first_name}
+                          </p>
+                          <p className="text-[9px] font-black text-orange-600 mt-1 uppercase">
+                            {cohortData!.entries[2].score} pts
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="opacity-0"></div>
+                      )}
                     </div>
 
-                    <div className="text-right shrink-0">
-                      <span className="text-xs font-black tracking-tight text-foreground">{score}</span>
-                      <span className="text-[8px] text-muted-foreground uppercase font-extrabold block">XP</span>
+                    {/* Cohort Ranked List */}
+                    <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                      {cohortData!.entries.map((competitor) => {
+                        const isCurrentUser = competitor.is_current_user;
+                        const initials = `${competitor.first_name?.[0] || 'S'}${competitor.last_name?.[0] || 'N'}`;
+                        const name = `${competitor.first_name} ${competitor.last_name}`;
+
+                        const rankColor = competitor.rank === 1 
+                          ? "bg-yellow-400/10 text-yellow-500 border-yellow-400/25 font-black" 
+                          : competitor.rank === 2 
+                          ? "bg-zinc-300/10 text-zinc-400 border-zinc-300/25 font-black"
+                          : competitor.rank === 3 
+                          ? "bg-amber-600/10 text-amber-600 border-amber-600/25 font-black"
+                          : "bg-muted text-muted-foreground border-border/60 font-bold";
+
+                        return (
+                          <div 
+                            key={competitor.user_id}
+                            className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all ${
+                              isCurrentUser 
+                                ? 'border-primary bg-primary/5 shadow-xs' 
+                                : 'border-border/50 bg-card/25 hover:bg-muted/20'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className={`h-6 w-6 text-center text-xs flex items-center justify-center rounded-lg border shrink-0 ${rankColor}`}>
+                                {competitor.rank}
+                              </span>
+                              
+                              <div className="h-8.5 w-8.5 rounded-full bg-gradient-to-br from-primary/10 to-indigo-500/10 border border-primary/20 flex items-center justify-center font-extrabold text-[11px] text-primary shrink-0">
+                                {initials}
+                              </div>
+                              
+                              <div className="min-w-0 text-left">
+                                <p className={`text-xs font-black truncate leading-tight flex items-center gap-1.5 ${isCurrentUser ? 'text-primary' : 'text-foreground'}`}>
+                                  {name}
+                                  {isCurrentUser && (
+                                    <span className="text-[9px] bg-primary/15 text-primary px-1.5 py-0.2 rounded font-bold">You</span>
+                                  )}
+                                </p>
+                                <p className="text-[9px] text-muted-foreground uppercase leading-none mt-0.5 truncate">
+                                  {competitor.major} • {competitor.university}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-black tracking-tight text-foreground">+{competitor.score}</span>
+                              <span className="text-[8px] text-muted-foreground uppercase font-extrabold block">PTS</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+
+                    {/* Visibility Notice if user opted out of leaderboard */}
+                    {!cohortData?.currentUserVisible && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/60 text-[11px] text-muted-foreground">
+                        <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span>
+                          Your leaderboard visibility is turned off in Settings. Your rank ({cohortData?.currentUserRank ? `#${cohortData.currentUserRank}` : "recorded"}) is counted, but your name is hidden from peers.
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : leaderboardScope === "notes" ? (
+              <CohortNotesPanel
+                cohortInfo={cohortInfo}
+                sharedFiles={sharedFiles}
+                onRefresh={handleRefreshSharedFiles}
+              />
+            ) : (
+              /* GLOBAL PLATFORM STANDINGS (Existing logic preserved exactly) */
+              <>
+                {/* 1. TOP 3 PODIUM VISUAL HIGHLIGHTS */}
+                <div className="grid grid-cols-3 gap-3 items-end pt-4 pb-2 border-b border-border/40 max-w-md mx-auto w-full">
+                  
+                  {/* 2ND RANK (Silver, left) */}
+                  {podiumUsers[1] ? (
+                    <div className="flex flex-col items-center">
+                      <div className="relative flex items-center justify-center">
+                        <div className="h-13 w-13 rounded-full bg-gradient-to-br from-zinc-200 to-zinc-400 border-2 border-zinc-300 flex items-center justify-center font-extrabold text-[12px] text-zinc-700 shrink-0 shadow-md">
+                          {podiumUsers[1].first_name[0]}{podiumUsers[1].last_name[0]}
+                        </div>
+                        <span className="absolute -bottom-1 h-5 w-5 rounded-full bg-zinc-400 border border-zinc-200 text-white font-black text-[9px] flex items-center justify-center shadow-sm">2</span>
+                      </div>
+                      <p className="text-[10px] font-black text-foreground text-center truncate w-full mt-2 leading-none">
+                        {podiumUsers[1].first_name}
+                      </p>
+                      <p className="text-[9px] font-black text-zinc-400 mt-1 uppercase">
+                        {rankingTab === "monthly" ? podiumUsers[1].monthly_xp : podiumUsers[1].total_xp} XP
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="opacity-0"></div>
+                  )}
+
+                  {/* 1ST RANK (Gold, center) */}
+                  {podiumUsers[0] ? (
+                    <div className="flex flex-col items-center transform -translate-y-2">
+                      <div className="relative flex items-center justify-center">
+                        <div className="absolute -top-3.5 text-yellow-400 animate-bounce">👑</div>
+                        <div className="h-16 w-16 rounded-full bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-500 border-3 border-yellow-400 flex items-center justify-center font-black text-[14px] text-yellow-950 shrink-0 shadow-lg shadow-yellow-500/20">
+                          {podiumUsers[0].first_name[0]}{podiumUsers[0].last_name[0]}
+                        </div>
+                        <span className="absolute -bottom-1.5 h-6 w-6 rounded-full bg-yellow-400 border-2 border-yellow-200 text-yellow-950 font-black text-[10px] flex items-center justify-center shadow-sm">1</span>
+                      </div>
+                      <p className="text-xs font-black text-foreground text-center truncate w-full mt-2.5 leading-none">
+                        {podiumUsers[0].first_name}
+                      </p>
+                      <p className="text-[10px] font-black text-yellow-500 mt-1 uppercase">
+                        {rankingTab === "monthly" ? podiumUsers[0].monthly_xp : podiumUsers[0].total_xp} XP
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="opacity-0"></div>
+                  )}
+
+                  {/* 3RD RANK (Bronze, right) */}
+                  {podiumUsers[2] ? (
+                    <div className="flex flex-col items-center">
+                      <div className="relative flex items-center justify-center">
+                        <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-600 to-orange-700 border-2 border-orange-600 flex items-center justify-center font-extrabold text-[11px] text-amber-100 shrink-0 shadow-md">
+                          {podiumUsers[2].first_name[0]}{podiumUsers[2].last_name[0]}
+                        </div>
+                        <span className="absolute -bottom-1 h-5 w-5 rounded-full bg-orange-700 border border-orange-500 text-white font-black text-[9px] flex items-center justify-center shadow-sm">3</span>
+                      </div>
+                      <p className="text-[10px] font-black text-foreground text-center truncate w-full mt-2 leading-none">
+                        {podiumUsers[2].first_name}
+                      </p>
+                      <p className="text-[9px] font-black text-orange-600 mt-1 uppercase">
+                        {rankingTab === "monthly" ? podiumUsers[2].monthly_xp : podiumUsers[2].total_xp} XP
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="opacity-0"></div>
+                  )}
+
+                </div>
+
+                {/* 2. REAL DB USERS LIST */}
+                <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                  {activeLeaderboard.map((competitor, idx) => {
+                    const isCurrentUser = competitor.user_id === initialProgress.user_id;
+                    const score = rankingTab === "monthly" ? competitor.monthly_xp : competitor.total_xp;
+                    
+                    const initials = `${competitor.first_name?.[0] || 'S'}${competitor.last_name?.[0] || 'N'}`;
+                    const name = `${competitor.first_name} ${competitor.last_name}`;
+
+                    const rankColor = idx === 0 
+                      ? "bg-yellow-400/10 text-yellow-500 border-yellow-400/25 font-black" 
+                      : idx === 1 
+                      ? "bg-zinc-300/10 text-zinc-400 border-zinc-300/25 font-black"
+                      : idx === 2 
+                      ? "bg-amber-600/10 text-amber-600 border-amber-600/25 font-black"
+                      : "bg-muted text-muted-foreground border-border/60 font-bold";
+
+                    return (
+                      <div 
+                        key={competitor.user_id}
+                        className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all ${
+                          isCurrentUser 
+                            ? 'border-primary bg-primary/5 shadow-xs' 
+                            : 'border-border/50 bg-card/25 hover:bg-muted/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={`h-6 w-6 text-center text-xs flex items-center justify-center rounded-lg border shrink-0 ${rankColor}`}>
+                            {idx + 1}
+                          </span>
+                          
+                          <div className="h-8.5 w-8.5 rounded-full bg-gradient-to-br from-primary/10 to-indigo-500/10 border border-primary/20 flex items-center justify-center font-extrabold text-[11px] text-primary shrink-0">
+                            {initials}
+                          </div>
+                          
+                          <div className="min-w-0 text-left">
+                            <p className={`text-xs font-black truncate leading-tight ${isCurrentUser ? 'text-primary' : 'text-foreground'}`}>
+                              {name}
+                            </p>
+                            <p className="text-[9px] text-muted-foreground uppercase leading-none mt-0.5 truncate">
+                              Level {competitor.current_level} • Accuracy: {competitor.quiz_accuracy}% • {getRankName(competitor.current_level).split(" ")[0]}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-black tracking-tight text-foreground">{score}</span>
+                          <span className="text-[8px] text-muted-foreground uppercase font-extrabold block">XP</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
           </CardContent>
         </Card>

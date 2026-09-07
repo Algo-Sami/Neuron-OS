@@ -650,22 +650,56 @@ export async function getSubjectFolders(subjectId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user || !subjectId) return [];
 
-  // Idempotently ensure standard folders (Lectures, Assignments, AI Generated) exist
-  try {
-    await scaffoldSubjectFoldersAction(subjectId);
-  } catch (scaffoldErr) {
-    console.warn("[getSubjectFolders] Scaffolding check warning:", scaffoldErr);
-  }
-
+  // 1. Directly query existing folders first (fast path)
   const { data, error } = await supabase
     .from("folders")
     .select("id, name, parent_folder_id, created_at")
     .eq("user_id", user.id)
     .eq("subject_id", subjectId)
-    .is("deleted_at", null)
     .order("name", { ascending: true });
 
-  if (error || !data) return [];
-  return data;
+  if (error) {
+    console.error("[getSubjectFolders] Error fetching folders:", error.message);
+    return [];
+  }
+
+  // 2. If folders exist, return immediately without unnecessary scaffolding overhead
+  if (data && data.length > 0) {
+    return data;
+  }
+
+  // 3. Fallback: Only scaffold standard folders if none exist for this subject
+  try {
+    await scaffoldSubjectFoldersAction(subjectId);
+    const { data: refetched } = await supabase
+      .from("folders")
+      .select("id, name, parent_folder_id, created_at")
+      .eq("user_id", user.id)
+      .eq("subject_id", subjectId)
+      .order("name", { ascending: true });
+    if (refetched && refetched.length > 0) {
+      return refetched;
+    }
+  } catch (scaffoldErr) {
+    console.warn("[getSubjectFolders] Scaffolding check warning:", scaffoldErr);
+  }
+
+  // 4. Direct insert fallback if scaffolding failed
+  try {
+    const { data: created } = await supabase
+      .from("folders")
+      .insert([
+        { user_id: user.id, subject_id: subjectId, parent_folder_id: null, name: "Lectures" },
+        { user_id: user.id, subject_id: subjectId, parent_folder_id: null, name: "Assignments" },
+      ])
+      .select("id, name, parent_folder_id, created_at");
+    if (created && created.length > 0) {
+      return created;
+    }
+  } catch (insertErr) {
+    console.warn("[getSubjectFolders] Direct folder creation fallback warning:", insertErr);
+  }
+
+  return [];
 }
 

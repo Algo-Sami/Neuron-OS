@@ -117,7 +117,11 @@ export default async function ProfilePage() {
           last_name: profile?.last_name ?? "",
           university: profile?.university ?? "",
           major: profile?.major ?? "",
-          avatar_url: profile?.avatar_url ?? null
+          avatar_url: profile?.avatar_url ?? null,
+          university_id: profile?.university_id ?? null,
+          program_id: profile?.program_id ?? null,
+          semester: profile?.semester ?? null,
+          cohort_id: profile?.cohort_id ?? null,
         }}
         progress={{
           total_xp: progress?.total_xp ?? 0,

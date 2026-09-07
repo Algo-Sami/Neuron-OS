@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { awardXP, getDynamicActivityStats } from "@/services/gamification/rewards";
+import { incrementWeeklyScore } from "@/services/gamification/weekly-scores";
 import { logger } from "@/lib/logger";
 import {
   evaluateConceptAnswer,
@@ -341,6 +342,9 @@ export async function saveCoachQuizAttemptAction(
 
     // Award XP
     await awardXP(userId, "complete_quiz", { score, totalQuestions });
+
+    // Phase 3: increment weekly competition score (quiz_completed)
+    await incrementWeeklyScore(userId, "quiz_completed");
 
     // Trigger dynamic weakness re-evaluation in background
     triggerWeaknessReevaluation(userId);

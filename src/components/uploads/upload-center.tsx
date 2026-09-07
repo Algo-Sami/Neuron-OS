@@ -42,14 +42,26 @@ import {
   Folder,
   FolderOpen,
   Copy,
+  Share2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   saveUploadMetadata, 
-  moveDocumentToRecycleBin, 
+  moveDocumentToRecycleBin,
   checkDuplicateUploadAction,
   getSummaryFileLocationAction,
+  checkUploadPreflightAction,
+  getUserUploadLimitAction,
 } from "@/actions/uploads";
+import { shareDocument, unshareDocument } from "@/actions/sharing";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { getSubjectFolders } from "@/actions/folders";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -102,6 +114,9 @@ export interface DocumentRow {
   ai_cooldown_until?: string | null;
   ai_error_category?: string | null;
   ai_error_message?: string | null;
+  is_shared?: boolean;
+  shared_cohort_id?: string | null;
+  shared_at?: string | null;
 }
 
 interface UploadCenterProps {
@@ -129,6 +144,8 @@ interface UploadQueueItem {
   documentId?: string;
   destinationSubject?: string | null;
   destinationFolder?: string | null;
+  subjectId?: string;
+  folderId?: string;
   abortController?: AbortController;
   classification?: {
     subjectId: string | null;
@@ -392,19 +409,12 @@ function UploadArea({
   const [isDragging, setIsDragging] = useState(false);
   const [queue, setQueue] = useState<UploadQueueItem[]>([]);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(subjects[0]?.id || "");
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
   const [selectedFolderId, setSelectedFolderId] = useState<string>("");
   const [availableFolders, setAvailableFolders] = useState<{ id: string; name: string }[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const settings = useSettingsStore();
-
-  // Sync selectedSubjectId when subjects load
-  useEffect(() => {
-    if (!selectedSubjectId && subjects.length > 0) {
-      setSelectedSubjectId(subjects[0].id);
-    }
-  }, [subjects, selectedSubjectId]);
 
   // Load available destination folders when selectedSubjectId changes
   useEffect(() => {
@@ -415,6 +425,7 @@ function UploadArea({
     }
     let isMounted = true;
     setLoadingFolders(true);
+    setSelectedFolderId(""); // Force user to explicitly choose a folder
     getSubjectFolders(selectedSubjectId)
       .then((folders) => {
         if (!isMounted) return;
@@ -422,12 +433,23 @@ function UploadArea({
         const valid = (folders || []).filter(
           (f) => f.name.trim().toLowerCase() !== "ai generated"
         );
-        setAvailableFolders(valid);
-        const lectureFolder = valid.find((f) => /lecture/i.test(f.name));
-        setSelectedFolderId(lectureFolder?.id || valid[0]?.id || "");
+        if (valid.length > 0) {
+          setAvailableFolders(valid);
+        } else {
+          setAvailableFolders([
+            { id: "Lectures", name: "Lectures" },
+            { id: "Assignments", name: "Assignments" },
+          ]);
+        }
       })
       .catch((err) => {
         console.warn("Failed to load subject folders:", err);
+        if (isMounted) {
+          setAvailableFolders([
+            { id: "Lectures", name: "Lectures" },
+            { id: "Assignments", name: "Assignments" },
+          ]);
+        }
       })
       .finally(() => {
         if (isMounted) setLoadingFolders(false);
@@ -438,6 +460,15 @@ function UploadArea({
     };
   }, [selectedSubjectId]);
 
+  const displayFolders = useMemo(() => {
+    if (availableFolders.length > 0) return availableFolders;
+    if (!selectedSubjectId) return [];
+    return [
+      { id: "Lectures", name: "Lectures" },
+      { id: "Assignments", name: "Assignments" },
+    ];
+  }, [availableFolders, selectedSubjectId]);
+
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingDoc, setPendingDoc] = useState<{
     documentId: string;
@@ -446,6 +477,19 @@ function UploadArea({
     fileName: string;
     fileTypeLabel: string;
   } | null>(null);
+
+  // Dynamic user upload limit (standard 50 MB vs boosted 100 MB)
+  const [effectiveUploadLimitMB, setEffectiveUploadLimitMB] = useState<number>(50);
+  const [isUploadBoosted, setIsUploadBoosted] = useState<boolean>(false);
+
+  useEffect(() => {
+    getUserUploadLimitAction()
+      .then((res) => {
+        setEffectiveUploadLimitMB(res.effectiveMaxMB);
+        setIsUploadBoosted(res.isBoosted);
+      })
+      .catch(() => {});
+  }, []);
 
 
   // Synchronize queue items with incoming document changes (e.g. real-time sync)
@@ -521,7 +565,10 @@ function UploadArea({
   // Validate single file
   const validateFile = (f: File): string | null => {
     if (f.size <= 0) return `"${f.name}" is an empty file.`;
-    if (f.size > MAX_FILE_SIZE) return `"${f.name}" exceeds the 50 MB limit.`;
+    const maxBytes = effectiveUploadLimitMB * 1024 * 1024;
+    if (f.size > maxBytes) {
+      return `"${f.name}" exceeds the ${effectiveUploadLimitMB} MB limit.`;
+    }
     const hasValid = VALID_EXTENSIONS.some((ext) =>
       f.name.toLowerCase().endsWith(ext)
     );
@@ -536,8 +583,19 @@ function UploadArea({
     const files = Array.from(fileList);
     if (files.length === 0) return;
 
+    if (!selectedSubjectId || !selectedFolderId) {
+      setValidationErrors([
+        !selectedSubjectId
+          ? "Please select a Subject before uploading."
+          : "Please select a destination Folder before uploading.",
+      ]);
+      return;
+    }
+
     const newErrors: string[] = [];
     const validItems: UploadQueueItem[] = [];
+    const currentSubject = subjects.find((s) => s.id === selectedSubjectId);
+    const currentFolder = displayFolders.find((f) => f.id === selectedFolderId);
 
     files.forEach((f) => {
       const err = validateFile(f);
@@ -567,6 +625,10 @@ function UploadArea({
         type: ext,
         status: "waiting",
         progress: 0,
+        subjectId: selectedSubjectId,
+        folderId: selectedFolderId,
+        destinationSubject: currentSubject?.name || null,
+        destinationFolder: currentFolder?.name || null,
       });
     });
 
@@ -576,12 +638,24 @@ function UploadArea({
 
     if (validItems.length > 0) {
       setQueue((prev) => [...prev, ...validItems]);
+      // Reset subject & folder selection after every upload queueing so user must select again for next upload
+      setSelectedSubjectId("");
+      setSelectedFolderId("");
+      setAvailableFolders([]);
     }
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    if (!selectedSubjectId) {
+      setValidationErrors(["Please select a Subject before uploading."]);
+      return;
+    }
+    if (!selectedFolderId) {
+      setValidationErrors(["Please select a destination Folder before uploading."]);
+      return;
+    }
     if (e.dataTransfer.files) {
       handleFiles(e.dataTransfer.files);
     }
@@ -608,13 +682,16 @@ function UploadArea({
         } = await supabase.auth.getUser();
         if (authErr || !user) throw new Error("Please log in to upload files.");
 
+        const targetSubjectId = item.subjectId || selectedSubjectId || undefined;
+        const targetFolderId = item.folderId || selectedFolderId || undefined;
+
         // ── 1. Application-level Duplicate Preflight Check ─────────────────────
         //    Checks destination folder before uploading file bytes to storage.
         try {
           const dupCheck = await checkDuplicateUploadAction({
             fileName: item.name,
-            subjectId: selectedSubjectId || undefined,
-            folderId: selectedFolderId || undefined,
+            subjectId: targetSubjectId,
+            folderId: targetFolderId,
           });
 
           if (dupCheck.success && dupCheck.isDuplicate) {
@@ -659,11 +736,39 @@ function UploadArea({
         const cleanName = item.name.replace(/[^a-zA-Z0-9.-]/g, "_");
         const filePath = `${user.id}/${Date.now()}_${cleanName}`;
 
+        // ── 2. Server-Side Quota & Upload Limit Preflight Gate ────────────────
+        //    Enforces boost and baseline limits BEFORE bytes hit Supabase Storage.
+        try {
+          const preflight = await checkUploadPreflightAction({
+            fileSize: item.size,
+            fileName: item.name,
+          });
+
+          if (!preflight.allowed) {
+            const errText = preflight.message || `File exceeds the allowed ${preflight.effectiveMaxMB} MB limit.`;
+            setQueue((prev) =>
+              prev.map((q) =>
+                q.id === item.id
+                  ? {
+                      ...q,
+                      status: "error",
+                      progress: 0,
+                      errorMsg: errText,
+                    }
+                  : q
+              )
+            );
+            return; // ABORT IMMEDIATELY: Bytes NEVER touch Supabase Storage!
+          }
+        } catch (preflightErr: any) {
+          console.warn("[Upload Preflight] Quota check error:", preflightErr);
+        }
+
         setQueue((prev) =>
           prev.map((q) => (q.id === item.id ? { ...q, progress: 45 } : q))
         );
 
-        // Upload to Supabase Storage
+        // Upload to Supabase Storage (only reached if preflight gate passed)
         const { error: storageErr } = await supabase.storage
           .from("documents")
           .upload(filePath, item.file, {
@@ -688,8 +793,8 @@ function UploadArea({
           fileUrl: publicUrl,
           fileType: item.type,
           fileSize: item.size,
-          subjectId: selectedSubjectId || undefined,
-          folderId: selectedFolderId || undefined,
+          subjectId: targetSubjectId,
+          folderId: targetFolderId,
         });
 
         if (!result.success) {
@@ -768,7 +873,7 @@ function UploadArea({
         );
       }
     },
-    [selectedSubjectId, settings, onUploadComplete]
+    [selectedSubjectId, selectedFolderId, settings, onUploadComplete]
   );
 
   // Queue Processor: Runs up to 2 concurrent uploads
@@ -842,21 +947,38 @@ function UploadArea({
       <div className="p-5 flex flex-col gap-4">
         {/* Explicit Subject & Folder Destination Selection */}
         {subjects.length > 0 ? (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/50 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg border border-border/60 bg-muted/20 text-xs transition-colors">
             <div className="flex items-center gap-2 text-muted-foreground min-w-0">
-              <FolderOpen className="h-4 w-4 text-primary shrink-0" />
-              <span className="font-semibold text-foreground">Upload Destination:</span>
+              <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="font-semibold text-foreground">Upload Destination:</span>
+                {!selectedSubjectId || !selectedFolderId ? (
+                  <span className="text-[11px] font-medium text-muted-foreground bg-muted/70 px-2 py-0.5 rounded-md border border-border/50">
+                    Selection required
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 flex items-center gap-1">
+                    <Check className="h-3 w-3" /> Ready
+                  </span>
+                )}
+              </div>
             </div>
             
-            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
               {/* Subject Selector */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground">Subject:</span>
+                <span className="text-[11px] text-muted-foreground font-medium">
+                  Subject <span className="text-primary">*</span>:
+                </span>
                 <select
                   value={selectedSubjectId}
-                  onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="rounded-md border border-border/60 bg-background text-foreground text-xs px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer max-w-[180px]"
+                  onChange={(e) => {
+                    setSelectedSubjectId(e.target.value);
+                    if (validationErrors.length > 0) setValidationErrors([]);
+                  }}
+                  className="rounded-md border border-input bg-background text-foreground text-xs px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary cursor-pointer max-w-[200px] shadow-xs transition-colors"
                 >
+                  <option value="">-- Select Subject --</option>
                   {subjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} {s.code ? `(${s.code})` : ""}
@@ -867,20 +989,30 @@ function UploadArea({
 
               {/* Folder Selector */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground">Folder:</span>
+                <span className="text-[11px] text-muted-foreground font-medium">
+                  Folder <span className="text-primary">*</span>:
+                </span>
                 <div className="flex items-center gap-1.5">
                   <select
                     value={selectedFolderId}
-                    onChange={(e) => setSelectedFolderId(e.target.value)}
-                    className="rounded-md border border-border/60 bg-background text-foreground text-xs px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer max-w-[220px]"
+                    onChange={(e) => {
+                      setSelectedFolderId(e.target.value);
+                      if (validationErrors.length > 0) setValidationErrors([]);
+                    }}
+                    disabled={!selectedSubjectId || loadingFolders}
+                    className={cn(
+                      "rounded-md border border-input bg-background text-foreground text-xs px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary max-w-[240px] shadow-xs transition-colors cursor-pointer",
+                      (!selectedSubjectId || loadingFolders) && "opacity-60 cursor-not-allowed"
+                    )}
                   >
-                    {(availableFolders.length > 0
-                      ? availableFolders
-                      : [
-                          { id: "Lectures", name: "Lectures" },
-                          { id: "Assignments", name: "Assignments" },
-                        ]
-                    ).map((f) => {
+                    <option value="">
+                      {!selectedSubjectId
+                        ? "-- Select Subject First --"
+                        : loadingFolders
+                        ? "Loading folders..."
+                        : "-- Select Folder --"}
+                    </option>
+                    {displayFolders.map((f) => {
                       const isLecture = /lecture/i.test(f.name);
                       return (
                         <option key={f.id} value={f.id}>
@@ -948,12 +1080,22 @@ function UploadArea({
             setIsDragging(false);
           }}
           onDrop={onDrop}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => {
+            if (!selectedSubjectId) {
+              setValidationErrors(["Please select a Subject before choosing files."]);
+              return;
+            }
+            if (!selectedFolderId) {
+              setValidationErrors(["Please select a destination Folder before choosing files."]);
+              return;
+            }
+            inputRef.current?.click();
+          }}
           className={cn(
             "border-2 border-dashed rounded-lg flex flex-col items-center justify-center py-7 px-4 text-center cursor-pointer transition-all duration-150 group",
             isDragging
               ? "border-primary bg-primary/5 shadow-inner"
-              : "border-border/60 hover:border-primary/50 hover:bg-muted/30"
+              : "border-border/70 hover:border-primary/50 hover:bg-muted/30"
           )}
         >
           <input
@@ -978,10 +1120,18 @@ function UploadArea({
             <Upload className="h-5 w-5" />
           </div>
           <p className="text-xs font-semibold text-foreground mb-0.5">
-            {isDragging ? "Drop files to upload" : "Drop files here or click to browse"}
+            {isDragging
+              ? "Drop files to upload"
+              : !selectedSubjectId
+              ? "Select a Subject & Folder above to upload"
+              : !selectedFolderId
+              ? "Select a destination Folder to continue"
+              : "Drop files here or click to browse"}
           </p>
           <p className="text-[11px] text-muted-foreground mb-2.5">
-            Select one or multiple files to upload simultaneously
+            {!selectedSubjectId || !selectedFolderId
+              ? "Subject and Folder selection is required before every upload"
+              : "Select one or multiple files to upload simultaneously"}
           </p>
           <div className="flex items-center gap-1.5">
             {["PDF", "DOCX", "PPTX", "TXT", "Images"].map((fmt) => (
@@ -1374,6 +1524,114 @@ const FORMAT_TABS: { key: FormatFilterKey; label: string }[] = [
   { key: "image", label: "Images" },
 ];
 
+function ShareConfirmDialog({
+  doc,
+  isOpen,
+  onClose,
+  onSuccess,
+}: {
+  doc: DocumentRow | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  if (!doc) return null;
+
+  const handleConfirm = async () => {
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const res = await shareDocument(doc.id);
+      if (!res.success) {
+        if (res.error === "join_cohort_first") {
+          setErrorMsg(
+            "You must join a cohort before sharing files. Update your University, Degree Program, and Year in your profile to be assigned to a cohort."
+          );
+        } else if (res.error === "not_found_or_not_owner") {
+          setErrorMsg("You can only share documents that you own.");
+        } else {
+          setErrorMsg(res.error || "Failed to share document.");
+        }
+        return;
+      }
+      onSuccess();
+      onClose();
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to share document.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md bg-card border border-border/70 shadow-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <Share2 className="h-4 w-4 text-primary" />
+            Share with Class
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Share <span className="font-medium text-foreground">{doc.title}</span> with other students in your cohort.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
+          <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-medium">Important Sharing Policy</p>
+            <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-300/90">
+              Only share material you have the right to share. Copyrighted textbook scans and slides marked confidential should not be shared here.
+            </p>
+          </div>
+        </div>
+
+        {errorMsg && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive flex items-start gap-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        <DialogFooter className="flex items-center justify-end gap-2 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="h-8 text-xs cursor-pointer"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleConfirm}
+            disabled={isSubmitting}
+            className="h-8 text-xs gap-1.5 cursor-pointer"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Sharing…
+              </>
+            ) : (
+              <>
+                <Share2 className="h-3.5 w-3.5" />
+                Confirm Share
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UploadHistorySection({
   documents,
   subjects,
@@ -1396,6 +1654,24 @@ function UploadHistorySection({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [generatingDocId, setGeneratingDocId] = useState<string | null>(null);
   const [navigatingSummaryId, setNavigatingSummaryId] = useState<string | null>(null);
+  const [shareDialogDoc, setShareDialogDoc] = useState<DocumentRow | null>(null);
+  const [unsharingDocId, setUnsharingDocId] = useState<string | null>(null);
+
+  const handleUnshare = async (docId: string) => {
+    try {
+      setUnsharingDocId(docId);
+      const res = await unshareDocument(docId);
+      if (res.success) {
+        startTransition(() => {
+          router.refresh();
+        });
+      } else {
+        alert(res.error || "Failed to unshare document");
+      }
+    } finally {
+      setUnsharingDocId(null);
+    }
+  };
 
   // Subject lookup map
   const subjectMap = useMemo(() => {
@@ -1875,8 +2151,14 @@ function UploadHistorySection({
                               >
                                 {doc.title}
                               </span>
+                              {doc.is_shared && (
+                                <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                  <Share2 className="h-2.5 w-2.5" />
+                                  Shared
+                                </span>
+                              )}
                               {isSelected && (
-                                <span className="text-[9px] font-semibold text-primary/70 uppercase tracking-wider">Details open</span>
+                                <span className="text-[9px] font-semibold text-primary/70 uppercase tracking-wider block">Details open</span>
                               )}
                             </div>
                           </button>
@@ -1982,6 +2264,31 @@ function UploadHistorySection({
                                       <FolderOpen className="h-3.5 w-3.5 mr-2 text-primary" />
                                       Open File Location
                                     </DropdownMenuItem>
+
+                                    {/* Note Sharing */}
+                                    <DropdownMenuSeparator />
+                                    {doc.is_shared ? (
+                                      <DropdownMenuItem
+                                        className="text-xs text-amber-600 dark:text-amber-400 cursor-pointer"
+                                        disabled={unsharingDocId === doc.id}
+                                        onClick={() => handleUnshare(doc.id)}
+                                      >
+                                        {unsharingDocId === doc.id ? (
+                                          <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                                        ) : (
+                                          <Share2 className="h-3.5 w-3.5 mr-2" />
+                                        )}
+                                        Unshare from Class
+                                      </DropdownMenuItem>
+                                    ) : (
+                                      <DropdownMenuItem
+                                        className="text-xs cursor-pointer"
+                                        onClick={() => setShareDialogDoc(doc)}
+                                      >
+                                        <Share2 className="h-3.5 w-3.5 mr-2 text-primary" />
+                                        Share to Class
+                                      </DropdownMenuItem>
+                                    )}
 
                                     {/* AI Tools — only for lecture files */}
                                     {isLectureFile && (
@@ -2118,6 +2425,15 @@ function UploadHistorySection({
                         <span className="text-[10px] text-muted-foreground">
                           {formatDate(doc.created_at)}
                         </span>
+                        {doc.is_shared && (
+                          <>
+                            <span className="text-[10px] text-muted-foreground">·</span>
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              <Share2 className="h-2.5 w-2.5" />
+                              Shared
+                            </span>
+                          </>
+                        )}
                       </div>
                       <div className="mt-1.5">
                         {getStatusBadge(
@@ -2186,6 +2502,31 @@ function UploadHistorySection({
                                 <FolderOpen className="h-3.5 w-3.5 mr-2 text-primary" />
                                 Open File Location
                               </DropdownMenuItem>
+
+                              {/* Note Sharing */}
+                              <DropdownMenuSeparator />
+                              {doc.is_shared ? (
+                                <DropdownMenuItem
+                                  className="text-xs text-amber-600 dark:text-amber-400 cursor-pointer"
+                                  disabled={unsharingDocId === doc.id}
+                                  onClick={() => handleUnshare(doc.id)}
+                                >
+                                  {unsharingDocId === doc.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                                  ) : (
+                                    <Share2 className="h-3.5 w-3.5 mr-2" />
+                                  )}
+                                  Unshare from Class
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem
+                                  className="text-xs cursor-pointer"
+                                  onClick={() => setShareDialogDoc(doc)}
+                                >
+                                  <Share2 className="h-3.5 w-3.5 mr-2 text-primary" />
+                                  Share to Class
+                                </DropdownMenuItem>
+                              )}
 
                               {/* AI Tools — only for lecture files */}
                               {isLectureFile && (
@@ -2339,6 +2680,18 @@ function UploadHistorySection({
           )}
         </div>
       )}
+
+      {/* Share to Class Confirmation Modal */}
+      <ShareConfirmDialog
+        doc={shareDialogDoc}
+        isOpen={Boolean(shareDialogDoc)}
+        onClose={() => setShareDialogDoc(null)}
+        onSuccess={() => {
+          startTransition(() => {
+            router.refresh();
+          });
+        }}
+      />
     </div>
   );
 }

@@ -39,6 +39,8 @@ export async function updateSession(request: NextRequest) {
     !user &&
     !request.nextUrl.pathname.startsWith('/login') &&
     !request.nextUrl.pathname.startsWith('/auth') &&
+    // Cron routes authenticate via their own CRON_SECRET bearer token — no session needed
+    !request.nextUrl.pathname.startsWith('/api/cron/') &&
     // Allow public access to home or other non-protected routes
     request.nextUrl.pathname !== '/'
   ) {

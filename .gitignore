@@ -47,3 +47,6 @@ lint_results.txt
 lint_results_full.json
 lint_results_utf8.txt
 
+# supabase temporary files
+supabase/.temp/
+

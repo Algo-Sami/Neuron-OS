@@ -8,12 +8,18 @@ export async function updateProfile({
   firstName,
   lastName,
   university,
-  major
+  major,
+  universityId,
+  programId,
+  semester,
 }: {
   firstName: string;
   lastName: string;
   university: string;
   major: string;
+  universityId?: string | null;
+  programId?: string | null;
+  semester?: string | null;
 }) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -22,17 +28,29 @@ export async function updateProfile({
     throw new Error("Unauthorized");
   }
 
+  const updatePayload: Record<string, any> = {
+    first_name: firstName,
+    last_name: lastName,
+    full_name: `${firstName} ${lastName}`.trim(),
+    university: university,
+    major: major,
+    degree_program: major,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (universityId !== undefined) {
+    updatePayload.university_id = universityId;
+  }
+  if (programId !== undefined) {
+    updatePayload.program_id = programId;
+  }
+  if (semester !== undefined) {
+    updatePayload.semester = semester;
+  }
+
   const { error } = await supabase
     .from("profiles")
-    .update({
-      first_name: firstName,
-      last_name: lastName,
-      full_name: `${firstName} ${lastName}`.trim(),
-      university: university,
-      major: major,
-      degree_program: major,
-      updated_at: new Date().toISOString()
-    })
+    .update(updatePayload)
     .eq("id", user.id);
 
   if (error) {
@@ -43,6 +61,33 @@ export async function updateProfile({
   revalidatePath("/profile");
   revalidatePath("/leaderboard");
   revalidatePath("/dashboard");
+
+  return { success: true };
+}
+
+export async function updateLeaderboardVisibility(visible: boolean) {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    throw new Error("Unauthorized");
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      leaderboard_visibility: visible,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", user.id);
+
+  if (error) {
+    console.error("Failed to update leaderboard visibility:", error.message);
+    throw new Error(`Failed to update leaderboard visibility: ${error.message}`);
+  }
+
+  revalidatePath("/profile");
+  revalidatePath("/leaderboard");
 
   return { success: true };
 }

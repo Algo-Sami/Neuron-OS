@@ -178,16 +178,20 @@ async function checkUsageAndLog(
   try {
     const supabase = await createWorkerSafeClient();
     
-    // 1. Resolve student tier (Free vs Premium)
+    // 1. Resolve student tier (Free vs Premium) and active Winner Boosts
     const { data: profile } = await supabase
       .from('profiles')
-      .select('major')
+      .select('is_premium, boost_ai_limit, boost_expires_at')
       .eq('id', userId)
       .single();
     
-    // Default tier: Free (we'll check standard limits)
-    const isPremium = profile?.major === 'premium' || false;
-    const limits = isPremium ? QUOTAS.premium : QUOTAS.free;
+    // Authoritative tier check: dedicated is_premium boolean flag
+    const isPremium = profile?.is_premium ?? false;
+    const baselineLimits = isPremium ? QUOTAS.premium : QUOTAS.free;
+
+    // Active winner boost check: stacks additively so both free and premium winners benefit
+    const isBoostActive = Boolean(profile?.boost_expires_at && new Date(profile.boost_expires_at) > new Date());
+    const effectiveDailyLimit = baselineLimits.dailyLimit + (isBoostActive ? (profile?.boost_ai_limit ?? 0) : 0);
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -207,22 +211,22 @@ async function checkUsageAndLog(
     const totalRequests = logs?.length || 0;
     const currentCost = logs?.reduce((sum, log) => sum + Number(log.estimated_cost), 0) || 0;
 
-    // Check rate limit bypasses
-    if (totalRequests >= limits.dailyLimit) {
-      logger.warn(`[AI Router] User ${userId} exceeded daily request limit (${totalRequests}/${limits.dailyLimit})`);
+    // Check rate limit bypasses against effective daily limit (baseline + boost)
+    if (totalRequests >= effectiveDailyLimit) {
+      logger.warn(`[AI Router] User ${userId} exceeded daily request limit (${totalRequests}/${effectiveDailyLimit})`);
       return { limitExceeded: true, shouldDowngrade: false };
     }
 
     // Check emergency shutdown budget
-    if (currentCost >= limits.shutdownLimit) {
-      logger.error(`[AI Router] User ${userId} exceeded emergency shutdown budget ($${currentCost.toFixed(4)}/$${limits.shutdownLimit})`);
+    if (currentCost >= baselineLimits.shutdownLimit) {
+      logger.error(`[AI Router] User ${userId} exceeded emergency shutdown budget ($${currentCost.toFixed(4)}/$${baselineLimits.shutdownLimit})`);
       return { limitExceeded: true, shouldDowngrade: false };
     }
 
     // Check soft budget warnings -> trigger model downgrade (Pro -> Flash)
-    const shouldDowngrade = currentCost >= limits.budgetLimit;
+    const shouldDowngrade = currentCost >= baselineLimits.budgetLimit;
     if (shouldDowngrade) {
-      logger.warn(`[AI Router] Soft budget warning. Downgrading models: $${currentCost.toFixed(4)}/$${limits.budgetLimit}`);
+      logger.warn(`[AI Router] Soft budget warning. Downgrading models: $${currentCost.toFixed(4)}/$${baselineLimits.budgetLimit}`);
     }
 
     // Insert log if this isn't just a pre-flight check

@@ -6,7 +6,7 @@ import {
   User, Shield, Bell, Sparkles, Sliders, FolderOpen, Key, Eye, 
   Trash2, Download, Upload, AlertCircle, Laptop, Check, RefreshCw, 
   Clock, Flame, Award, CheckCircle2, Moon, Sun, Info, 
-  Smartphone, Monitor, Mail, LogOut, BrainCircuit
+  Smartphone, Monitor, Mail, LogOut, BrainCircuit, Building2, GraduationCap, Search
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +14,14 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useSettingsStore } from "@/store/settings-store";
 import { Switch, SettingRow, SectionCard } from "./shared";
-import { updateProfile } from "@/actions/profile";
+import { updateProfile, updateLeaderboardVisibility } from "@/actions/profile";
+import { 
+  getUniversities, 
+  getDegreePrograms, 
+  requestMissingUniversity, 
+  UniversityItem, 
+  DegreeProgramItem 
+} from "@/actions/reference-data";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
@@ -28,6 +35,10 @@ interface ProfileSettingsProps {
     university: string | null;
     major: string | null;
     avatar_url: string | null;
+    university_id?: string | null;
+    program_id?: string | null;
+    semester?: string | null;
+    cohort_id?: string | null;
   };
   dbProgress: {
     total_xp: number;
@@ -54,17 +65,149 @@ export function ProfileSettings({
 }: ProfileSettingsProps) {
   const store = useSettingsStore();
   
-  // Local Form state (DB-persisted fields only)
+  // Local Form state (DB-persisted fields)
   const [firstName, setFirstName] = useState(dbProfile.first_name || "");
   const [lastName, setLastName] = useState(dbProfile.last_name || "");
   const [university, setUniversity] = useState(dbProfile.university || "");
   const [major, setMajor] = useState(dbProfile.major || "");
+  const [universityId, setUniversityId] = useState<string | null>(dbProfile.university_id || null);
+  const [programId, setProgramId] = useState<string | null>(dbProfile.program_id || null);
+  const [semester, setSemester] = useState(dbProfile.semester || "");
   
+  // Reference data state
+  const [universities, setUniversities] = useState<UniversityItem[]>([]);
+  const [programs, setPrograms] = useState<DegreeProgramItem[]>([]);
+  const [loadingUniversities, setLoadingUniversities] = useState(true);
+  const [loadingPrograms, setLoadingPrograms] = useState(false);
+  const [universitySearch, setUniversitySearch] = useState(dbProfile.university || "");
+  const [isUniDropdownOpen, setIsUniDropdownOpen] = useState(false);
+  const uniDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Missing University Modal state
+  const [isMissingModalOpen, setIsMissingModalOpen] = useState(false);
+  const [reqUniName, setReqUniName] = useState("");
+  const [reqUniEmail, setReqUniEmail] = useState(userEmail || "");
+  const [reqUniNote, setReqUniNote] = useState("");
+  const [reqLoading, setReqLoading] = useState(false);
+  const [reqSuccess, setReqSuccess] = useState(false);
+  const [reqError, setReqError] = useState("");
+
   // UI-only local state (not duplicating store values)
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (uniDropdownRef.current && !uniDropdownRef.current.contains(e.target as Node)) {
+        setIsUniDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Fetch universities and programs on mount / profile change
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      setLoadingUniversities(true);
+      const data = await getUniversities();
+      if (!isMounted) return;
+      setUniversities(data);
+      setLoadingUniversities(false);
+
+      if (dbProfile.university_id) {
+        setLoadingPrograms(true);
+        const progs = await getDegreePrograms(dbProfile.university_id);
+        if (isMounted) {
+          setPrograms(progs);
+          setLoadingPrograms(false);
+        }
+      } else if (dbProfile.university) {
+        // Match existing free-text name if possible to preselect corresponding id
+        const match = data.find(u => u.name.toLowerCase() === dbProfile.university?.toLowerCase());
+        if (match) {
+          setUniversityId(match.id);
+          setUniversity(match.name);
+          setUniversitySearch(match.name);
+          setLoadingPrograms(true);
+          const progs = await getDegreePrograms(match.id);
+          if (isMounted) {
+            setPrograms(progs);
+            if (dbProfile.major) {
+              const progMatch = progs.find(p => p.name.toLowerCase() === dbProfile.major?.toLowerCase());
+              if (progMatch) {
+                setProgramId(progMatch.id);
+              }
+            }
+            setLoadingPrograms(false);
+          }
+        }
+      }
+    })();
+    return () => { isMounted = false; };
+  }, [dbProfile.university_id, dbProfile.university, dbProfile.major]);
+
+  const handleSelectUniversity = async (item: UniversityItem) => {
+    setUniversityId(item.id);
+    setUniversity(item.name);
+    setUniversitySearch(item.name);
+    setIsUniDropdownOpen(false);
+    // Reset dependent program
+    setProgramId(null);
+    setMajor("");
+    setLoadingPrograms(true);
+    const progs = await getDegreePrograms(item.id);
+    setPrograms(progs);
+    setLoadingPrograms(false);
+  };
+
+  const handleSelectProgram = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedProgId = e.target.value;
+    if (!selectedProgId) {
+      setProgramId(null);
+      setMajor("");
+      return;
+    }
+    const found = programs.find(p => p.id === selectedProgId);
+    if (found) {
+      setProgramId(found.id);
+      setMajor(found.name);
+    }
+  };
+
+  const handleMissingUniversitySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setReqLoading(true);
+    setReqError("");
+    setReqSuccess(false);
+
+    try {
+      const res = await requestMissingUniversity(reqUniName, reqUniEmail, reqUniNote);
+      if (res.success) {
+        setReqSuccess(true);
+        setTimeout(() => {
+          setIsMissingModalOpen(false);
+          setReqSuccess(false);
+          setReqUniName("");
+          setReqUniNote("");
+        }, 2000);
+      } else {
+        setReqError(res.error || "Failed to submit request.");
+      }
+    } catch (err: any) {
+      setReqError(err?.message || "An unexpected error occurred.");
+    } finally {
+      setReqLoading(false);
+    }
+  };
+
+  const filteredUniversities = universities.filter(u => 
+    u.name.toLowerCase().includes(universitySearch.toLowerCase())
+  );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,19 +216,22 @@ export function ProfileSettings({
     setErrorMsg("");
 
     try {
-      // 1. Save DB columns via server action
+      // 1. Save DB columns via server action (persists both legacy text & new FK ids)
       const res = await updateProfile({
         firstName,
         lastName,
         university,
-        major
+        major,
+        universityId,
+        programId,
+        semester: semester || null
       });
 
       if (res.success) {
-        // Store-backed fields are already live in the Zustand store (no extra updateSettings call needed);
-        // they were modified directly via store.updateSetting() on each onChange.
         setSuccess(true);
         onProfileSaveSuccess();
+        // Mirror semester to Zustand store as a cache after successful DB save
+        store.updateSetting("semester", semester);
         setTimeout(() => setSuccess(false), 3000);
       }
     } catch (err: any) {
@@ -100,7 +246,10 @@ export function ProfileSettings({
     setLastName(dbProfile.last_name || "");
     setUniversity(dbProfile.university || "");
     setMajor(dbProfile.major || "");
-    // Store fields reset to their persisted defaults (no-op if unchanged)
+    setUniversityId(dbProfile.university_id || null);
+    setProgramId(dbProfile.program_id || null);
+    setUniversitySearch(dbProfile.university || "");
+    setSemester(dbProfile.semester || "");
   };
 
 
@@ -201,21 +350,136 @@ export function ProfileSettings({
                 placeholder="Write a short description about your scholarly interests..."
               />
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="university" className="text-[10px] font-bold text-muted-foreground uppercase">University / Institution</Label>
-              <Input id="university" value={university} onChange={e => setUniversity(e.target.value)} className="h-9 text-xs rounded-xl" />
+            {/* Searchable University Dropdown */}
+            <div className="space-y-1 relative" ref={uniDropdownRef}>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="university-search" className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                  <Building2 className="h-3 w-3 text-primary" /> University / Institution
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReqUniName(universitySearch && universitySearch !== university ? universitySearch : "");
+                    setReqError("");
+                    setReqSuccess(false);
+                    setIsMissingModalOpen(true);
+                  }}
+                  className="text-[10px] text-primary hover:underline font-medium cursor-pointer transition-colors"
+                >
+                  Can&apos;t find your university? Contact us
+                </button>
+              </div>
+              <div className="relative">
+                <Input
+                  id="university-search"
+                  value={universitySearch}
+                  onChange={e => {
+                    setUniversitySearch(e.target.value);
+                    setIsUniDropdownOpen(true);
+                  }}
+                  onFocus={() => setIsUniDropdownOpen(true)}
+                  placeholder={loadingUniversities ? "Loading universities..." : "Type to search university..."}
+                  autoComplete="off"
+                  className="h-9 text-xs rounded-xl pr-8"
+                />
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                  <Search className="h-3.5 w-3.5" />
+                </div>
+              </div>
+
+              {/* Search Dropdown Results */}
+              {isUniDropdownOpen && (
+                <div className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-card border border-border/80 rounded-xl shadow-xl py-1 text-xs">
+                  {loadingUniversities ? (
+                    <div className="p-3 text-center text-muted-foreground text-xs">Loading institutions...</div>
+                  ) : filteredUniversities.length === 0 ? (
+                    <div className="p-3 text-center space-y-2">
+                      <p className="text-xs text-muted-foreground">No matching university found.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReqUniName(universitySearch);
+                          setIsUniDropdownOpen(false);
+                          setIsMissingModalOpen(true);
+                        }}
+                        className="text-[11px] text-primary hover:underline font-semibold"
+                      >
+                        Request to add &quot;{universitySearch}&quot; &rarr;
+                      </button>
+                    </div>
+                  ) : (
+                    filteredUniversities.map(u => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => handleSelectUniversity(u)}
+                        className={`w-full text-left px-3 py-2 flex items-center justify-between hover:bg-primary/10 transition-colors cursor-pointer ${
+                          universityId === u.id ? "bg-primary/15 font-semibold text-primary" : "text-foreground"
+                        }`}
+                      >
+                        <span className="truncate">{u.name}</span>
+                        {universityId === u.id && <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-2" />}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
+
             <div className="space-y-1">
               <Label htmlFor="department" className="text-[10px] font-bold text-muted-foreground uppercase">Department</Label>
               <Input id="department" value={store.department} onChange={e => store.updateSetting("department", e.target.value)} className="h-9 text-xs rounded-xl" placeholder="e.g. Computer Science" />
             </div>
+
+            {/* Dependent Degree Program Dropdown */}
             <div className="space-y-1">
-              <Label htmlFor="major" className="text-[10px] font-bold text-muted-foreground uppercase">Major / Field of Study</Label>
-              <Input id="major" value={major} onChange={e => setMajor(e.target.value)} className="h-9 text-xs rounded-xl" placeholder="e.g. Artificial Intelligence" />
+              <Label htmlFor="program" className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                <GraduationCap className="h-3 w-3 text-primary" /> Major / Degree Program
+              </Label>
+              <select
+                id="program"
+                disabled={!universityId || loadingPrograms}
+                value={programId || ""}
+                onChange={handleSelectProgram}
+                className={`w-full h-9 px-3 text-xs rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all ${
+                  !universityId ? "opacity-60 cursor-not-allowed bg-muted/40 text-muted-foreground" : "cursor-pointer"
+                }`}
+              >
+                {!universityId ? (
+                  <option value="">Select a university first</option>
+                ) : loadingPrograms ? (
+                  <option value="">Loading degree programs...</option>
+                ) : programs.length === 0 ? (
+                  <option value="">No programs indexed yet</option>
+                ) : (
+                  <>
+                    <option value="">Select a degree program</option>
+                    {programs.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                    {major && !programs.some(p => p.id === programId) && (
+                      <option value="" disabled>Current: {major}</option>
+                    )}
+                  </>
+                )}
+              </select>
+              {universityId && programs.length === 0 && !loadingPrograms && (
+                <p className="text-[10px] text-amber-500 mt-1">
+                  No programs cataloged for this campus yet. Current setting: &quot;{major || "None"}&quot;.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label htmlFor="semester" className="text-[10px] font-bold text-muted-foreground uppercase">Semester</Label>
-              <Input id="semester" value={store.semester} onChange={e => store.updateSetting("semester", e.target.value)} className="h-9 text-xs rounded-xl" placeholder="e.g. 4th Semester" />
+              <Input
+                id="semester"
+                value={semester}
+                onChange={e => setSemester(e.target.value)}
+                className="h-9 text-xs rounded-xl"
+                placeholder="e.g. Semester 4"
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="studentId" className="text-[10px] font-bold text-muted-foreground uppercase">Student ID (Optional)</Label>
@@ -302,6 +566,105 @@ export function ProfileSettings({
           <DialogFooter>
             <Button size="xs" onClick={() => setIsPreviewOpen(false)} className="text-xs rounded-xl">Close Preview</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Request Missing University Dialog */}
+      <Dialog open={isMissingModalOpen} onOpenChange={setIsMissingModalOpen}>
+        <DialogContent className="sm:max-w-md bg-card border border-border/80 p-6 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-primary" /> Request Your Institution
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Can&apos;t find your university or college? Submit your campus details and our academic team will index it for you.
+            </DialogDescription>
+          </DialogHeader>
+
+          {reqSuccess ? (
+            <div className="py-6 text-center space-y-2">
+              <div className="h-10 w-10 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center">
+                <Check className="h-5 w-5" />
+              </div>
+              <p className="text-xs font-bold text-foreground">Request Submitted Successfully!</p>
+              <p className="text-[11px] text-muted-foreground">
+                Thank you. We will verify and catalog your institution into the system.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleMissingUniversitySubmit} className="space-y-4 py-2">
+              {reqError && (
+                <div className="p-2.5 bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold rounded-xl">
+                  {reqError}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <Label htmlFor="req-uni-name" className="text-[10px] font-bold text-muted-foreground uppercase">
+                  University / College Name *
+                </Label>
+                <Input
+                  id="req-uni-name"
+                  required
+                  maxLength={255}
+                  value={reqUniName}
+                  onChange={e => setReqUniName(e.target.value)}
+                  placeholder="e.g. COMSATS University Islamabad"
+                  className="h-9 text-xs rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="req-uni-email" className="text-[10px] font-bold text-muted-foreground uppercase">
+                  Your Student Email *
+                </Label>
+                <Input
+                  id="req-uni-email"
+                  type="email"
+                  required
+                  maxLength={255}
+                  value={reqUniEmail}
+                  onChange={e => setReqUniEmail(e.target.value)}
+                  placeholder="you@university.edu"
+                  className="h-9 text-xs rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="req-uni-note" className="text-[10px] font-bold text-muted-foreground uppercase">
+                  Campus / Specific Degree Program (Optional)
+                </Label>
+                <textarea
+                  id="req-uni-note"
+                  maxLength={1000}
+                  value={reqUniNote}
+                  onChange={e => setReqUniNote(e.target.value)}
+                  placeholder="e.g. Attock Campus, Department of Computer Science..."
+                  className="w-full min-h-[60px] p-2.5 text-xs rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+                />
+              </div>
+
+              <DialogFooter className="gap-2 sm:gap-0 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="text-xs h-8 rounded-xl"
+                  onClick={() => setIsMissingModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={reqLoading || !reqUniName.trim() || !reqUniEmail.trim()}
+                  size="xs"
+                  className="text-xs h-8 px-4 rounded-xl bg-primary"
+                >
+                  {reqLoading ? "Submitting..." : "Submit Request"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -1323,7 +1686,17 @@ export function PrivacySecurity({ onDeleteAccountClick }: PrivacySecurityProps) 
           </SettingRow>
 
           <SettingRow label="Leaderboard Visibility" description="Appear inside the weekly XP top ranking list.">
-            <Switch checked={store.leaderboardVisibility} onChange={val => store.updateSetting("leaderboardVisibility", val)} />
+            <Switch 
+              checked={store.leaderboardVisibility} 
+              onChange={async (val) => {
+                try {
+                  await updateLeaderboardVisibility(val);
+                  store.updateSetting("leaderboardVisibility", val);
+                } catch (err) {
+                  console.error("Failed to update leaderboard visibility:", err);
+                }
+              }} 
+            />
           </SettingRow>
 
           <SettingRow label="Study Room Default Privacy" description="Choose privacy setting when spawning study rooms.">

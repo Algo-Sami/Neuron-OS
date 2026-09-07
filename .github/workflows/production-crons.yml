@@ -1,0 +1,37 @@
+name: Production Crons
+
+on:
+  schedule:
+    # Every 10 minutes: Alert on any stuck / stalled BullMQ study-pack generation jobs
+    - cron: '*/10 * * * *'
+    # Every Sunday at 23:55 UTC: Finalize leaderboard scores and assign 7-day winner boosts
+    - cron: '55 23 * * 0'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Manually trigger a cron job'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - check-stalled-jobs
+          - finalize-weekly-scores
+
+jobs:
+  execute-crons:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Stalled Jobs
+        if: github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *' || github.event.inputs.job == 'check-stalled-jobs' || github.event.inputs.job == 'all'
+        run: |
+          echo "Triggering check-stalled-jobs..."
+          curl -fsSL -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/check-stalled-jobs" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+      - name: Finalize Weekly Scores
+        if: github.event_name == 'schedule' && github.event.schedule == '55 23 * * 0' || github.event.inputs.job == 'finalize-weekly-scores' || github.event.inputs.job == 'all'
+        run: |
+          echo "Triggering finalize-weekly-scores..."
+          curl -fsSL -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/finalize-weekly-scores" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

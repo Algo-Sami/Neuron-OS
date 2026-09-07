@@ -79,6 +79,8 @@ export async function signUpAndOnboard(fields: {
   studyGoals: string[];
   country: string;
   timezone: string;
+  universityId?: string | null;
+  programId?: string | null;
 }) {
   const supabase = await createClient();
 
@@ -139,6 +141,8 @@ export async function signUpAndOnboard(fields: {
         study_goals: fields.studyGoals,
         country: fields.country,
         timezone: fields.timezone,
+        university_id: fields.universityId || null,
+        program_id: fields.programId || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", userId);

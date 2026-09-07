@@ -12,6 +12,97 @@ import {
   findNextAvailableCopyName,
   extractBaseFileName,
 } from '@/services/storage/duplicate-detection'
+import { MAX_FILE_SIZE_MB } from '@/constants/limits'
+
+export type UploadPreflightResponse = {
+  allowed: boolean;
+  effectiveMaxMB: number;
+  maxBytes: number;
+  isBoosted: boolean;
+  message?: string;
+  code?: 'AUTH_ERROR' | 'FILE_TOO_LARGE' | 'OK';
+};
+
+/**
+ * Server preflight action that enforces upload size limits BEFORE bytes are sent to Supabase Storage.
+ * Takes active winner boosts into account (e.g. 100 MB boosted vs 50 MB standard).
+ */
+export async function checkUploadPreflightAction(params: {
+  fileSize: number;
+  fileName?: string;
+}): Promise<UploadPreflightResponse> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return {
+      allowed: false,
+      effectiveMaxMB: MAX_FILE_SIZE_MB,
+      maxBytes: MAX_FILE_SIZE_MB * 1024 * 1024,
+      isBoosted: false,
+      code: 'AUTH_ERROR',
+      message: 'Please log in to upload files.',
+    };
+  }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('boost_upload_limit, boost_expires_at')
+    .eq('id', user.id)
+    .single();
+
+  const isBoostActive = Boolean(profile?.boost_expires_at && new Date(profile.boost_expires_at) > new Date());
+  const effectiveMaxMB = (isBoostActive && profile?.boost_upload_limit)
+    ? profile.boost_upload_limit
+    : MAX_FILE_SIZE_MB;
+
+  const maxBytes = effectiveMaxMB * 1024 * 1024;
+
+  if (params.fileSize > maxBytes) {
+    const fileLabel = params.fileName ? `"${params.fileName}"` : 'File';
+    return {
+      allowed: false,
+      effectiveMaxMB,
+      maxBytes,
+      isBoosted: isBoostActive,
+      code: 'FILE_TOO_LARGE',
+      message: `${fileLabel} exceeds the ${effectiveMaxMB} MB upload limit.`,
+    };
+  }
+
+  return {
+    allowed: true,
+    effectiveMaxMB,
+    maxBytes,
+    isBoosted: isBoostActive,
+    code: 'OK',
+  };
+}
+
+/**
+ * Resolves the effective upload limit for the current user to configure UI file pickers and badges.
+ */
+export async function getUserUploadLimitAction(): Promise<{ effectiveMaxMB: number; isBoosted: boolean }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { effectiveMaxMB: MAX_FILE_SIZE_MB, isBoosted: false };
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('boost_upload_limit, boost_expires_at')
+      .eq('id', user.id)
+      .single();
+
+    const isBoostActive = Boolean(profile?.boost_expires_at && new Date(profile.boost_expires_at) > new Date());
+    const effectiveMaxMB = (isBoostActive && profile?.boost_upload_limit)
+      ? profile.boost_upload_limit
+      : MAX_FILE_SIZE_MB;
+
+    return { effectiveMaxMB, isBoosted: isBoostActive };
+  } catch {
+    return { effectiveMaxMB: MAX_FILE_SIZE_MB, isBoosted: false };
+  }
+}
 
 export type SaveUploadMetadataResponse = {
   success: true;
@@ -94,6 +185,26 @@ export async function saveUploadMetadata({
       success: false,
       code: 'AUTH_ERROR',
       message: 'Unauthorized. Please log in to upload files.',
+    };
+  }
+
+  // 1a. Secondary Invariant Guard: Enforce effective upload limit
+  const { data: profileLimit } = await supabase
+    .from('profiles')
+    .select('boost_upload_limit, boost_expires_at')
+    .eq('id', user.id)
+    .single();
+
+  const isBoostActive = Boolean(profileLimit?.boost_expires_at && new Date(profileLimit.boost_expires_at) > new Date());
+  const effectiveMaxMB = (isBoostActive && profileLimit?.boost_upload_limit)
+    ? profileLimit.boost_upload_limit
+    : MAX_FILE_SIZE_MB;
+
+  if (fileSize > effectiveMaxMB * 1024 * 1024) {
+    return {
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: `File "${fileName}" exceeds your allowed upload limit of ${effectiveMaxMB} MB.`,
     };
   }
 

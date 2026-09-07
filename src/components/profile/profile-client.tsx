@@ -40,6 +40,10 @@ interface ProfileClientProps {
     university: string | null;
     major: string | null;
     avatar_url: string | null;
+    university_id?: string | null;
+    program_id?: string | null;
+    semester?: string | null;
+    cohort_id?: string | null;
   };
   progress: {
     total_xp: number;

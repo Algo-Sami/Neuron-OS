@@ -124,6 +124,9 @@ export default async function UploadsPage() {
         size: u.file_size,
         uploads: { file_size: u.file_size },
         file_deleted: true,
+        is_shared: false,
+        shared_cohort_id: null,
+        shared_at: null,
       };
     });
 

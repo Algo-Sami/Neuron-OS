@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { awardXP } from "@/services/gamification/rewards";
+import { incrementWeeklyScore } from "@/services/gamification/weekly-scores";
 import { routeAIRequest } from "@/services/ai/router";
 import { buildQuizGenerationPrompt } from "@/services/ai/agents/quiz";
 
@@ -362,6 +363,9 @@ export async function submitQuizAction(
       totalQuestions,
       bonusXp: extraXP
     });
+
+    // Phase 3: increment weekly competition score (quiz_completed)
+    await incrementWeeklyScore(user.id, "quiz_completed");
     
     const finalXP = result.newXp;
     const finalLevel = result.newLevel;

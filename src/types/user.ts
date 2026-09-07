@@ -8,6 +8,9 @@ export interface UserProfile {
   bio?: string | null;
   university?: string | null;
   degree_program?: string | null;
+  university_id?: string | null;
+  program_id?: string | null;
+  cohort_id?: string | null;
   semester?: string | null;
   profile_image?: string | null;
   interests?: string[] | null;
@@ -26,6 +29,8 @@ export interface SignUpFields {
   bio: string;
   university: string;
   degreeProgram: string;
+  universityId?: string | null;
+  programId?: string | null;
   semester: string;
   profileImage: string | null;
   interests: string[];

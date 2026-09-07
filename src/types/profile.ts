@@ -8,6 +8,9 @@ export interface UserProfileDetails {
   bio?: string;
   university?: string;
   degree_program?: string;
+  university_id?: string | null;
+  program_id?: string | null;
+  cohort_id?: string | null;
   semester?: string;
   profile_image?: string;
   interests?: string[];
