@@ -26,12 +26,24 @@ jobs:
         if: github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *' || github.event.inputs.job == 'check-stalled-jobs' || github.event.inputs.job == 'all'
         run: |
           echo "Triggering check-stalled-jobs..."
-          curl -fsSL -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/check-stalled-jobs" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          RESPONSE=$(curl -sSL -w "\nHTTP_STATUS:%{http_code}\n" -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/check-stalled-jobs" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d: -f2)
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
+            echo "Request failed with status $STATUS"
+            exit 1
+          fi
 
       - name: Finalize Weekly Scores
         if: github.event_name == 'schedule' && github.event.schedule == '55 23 * * 0' || github.event.inputs.job == 'finalize-weekly-scores' || github.event.inputs.job == 'all'
         run: |
           echo "Triggering finalize-weekly-scores..."
-          curl -fsSL -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/finalize-weekly-scores" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          RESPONSE=$(curl -sSL -w "\nHTTP_STATUS:%{http_code}\n" -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/finalize-weekly-scores" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d: -f2)
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
+            echo "Request failed with status $STATUS"
+            exit 1
+          fi
