@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+  --font-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-geist-mono);
-  --font-heading: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+  --font-heading: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -50,29 +50,29 @@
 
 :root {
   --background: #f8fafc;
-  --foreground: #201f1e;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-foreground: #201f1e;
+  --card-foreground: #0f172a;
   --popover: #ffffff;
-  --popover-foreground: #201f1e;
+  --popover-foreground: #0f172a;
   --primary: #0078d4;
   --primary-foreground: #ffffff;
-  --secondary: #f3f2f1;
-  --secondary-foreground: #201f1e;
-  --muted: #f3f4f6;
-  --muted-foreground: #605e5c;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
   --accent: #eff6fc;
   --accent-foreground: #0078d4;
-  --destructive: #d13438;
-  --border: #d0d4db;
-  --input: #d0d4db;
+  --destructive: #ef4444;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
   --ring: #0078d4;
   --chart-1: #0078d4;
   --chart-2: #107c41;
   --chart-3: #d83b01;
   --chart-4: #5c2d91;
   --chart-5: #008272;
-  --radius: 0.375rem;
+  --radius: 0.875rem;
   --sidebar: #ffffff;
   --sidebar-foreground: #201f1e;
   --sidebar-primary: #0078d4;
@@ -378,4 +378,28 @@ body:has(.dashboard-layout-root) {
 
 .animate-shimmer {
   animation: shimmer 1.8s ease-in-out infinite;
+}
+
+/* ── Google & Fiverr Modern Web Styling Utilities ────────────────────────────── */
+.google-card {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 1rem;
+  box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.05), 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.google-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(0, 120, 212, 0.35);
+  box-shadow: 0 20px 32px -10px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.03);
+}
+
+.fiverr-pill {
+  border-radius: 9999px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fiverr-pill:hover {
+  transform: translateY(-1px);
 }

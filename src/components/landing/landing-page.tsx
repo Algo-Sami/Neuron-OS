@@ -13,10 +13,7 @@ import { FloatingWhatsApp } from "./floating-whatsapp";
 
 export function LandingPage() {
   return (
-    <div
-      className="min-h-screen bg-[#f8fafc] text-[#201f1e] overflow-x-hidden selection:bg-[#c7e0f4] selection:text-[#004578]"
-      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif' }}
-    >
+    <div className="min-h-screen bg-[#fafbfc] text-slate-900 overflow-x-hidden selection:bg-blue-100 selection:text-blue-800">
       <LandingNavbar />
       <HeroSection />
       <StatsSection />

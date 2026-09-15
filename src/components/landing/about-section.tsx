@@ -74,8 +74,7 @@ export function AboutSection() {
   return (
     <section
       id="about"
-      className="relative py-20 lg:py-28 bg-[#f8fafc] border-b border-[#e1dfdd]"
-      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+      className="relative py-20 lg:py-28 bg-[#fafbfc] border-b border-slate-200/70"
     >
       <div
         ref={sectionRef}
@@ -84,37 +83,37 @@ export function AboutSection() {
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           {/* Left: Problem → Solution */}
-          <div className="space-y-6">
-            <div className="space-y-3">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[3px] bg-white border border-[#d0d4db] shadow-xs">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0078d4]">
+          <div className="space-y-6 sm:space-y-8">
+            <div className="space-y-3.5">
+              <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-rose-50/80 border border-rose-200/60 shadow-xs">
+                <span className="text-xs font-semibold uppercase tracking-wider text-rose-600">
                   The Problem
                 </span>
               </div>
-              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#201f1e] tracking-tight leading-tight">
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
                 Students Waste{" "}
-                <span className="text-[#a4262c]">Thousands of Hours</span>{" "}
+                <span className="text-rose-600">Thousands of Hours</span>{" "}
                 on Broken Workflows
               </h2>
-              <p className="text-sm sm:text-base text-[#475569] leading-relaxed">
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
                 The average university student juggles 5+ apps just to manage their studies. Notes in one place, deadlines in another, lectures buried in email. Neuron OS solves this.
               </p>
             </div>
 
             {/* Problem → Solution list */}
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               {PROBLEMS.map(({ icon, problem, solution }) => (
                 <div
                   key={problem}
-                  className="flex items-center gap-3.5 p-3.5 rounded-[4px] bg-white border border-[#d0d4db] shadow-xs"
+                  className="flex items-center gap-4 p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 hover:shadow-md transition-all duration-200"
                 >
-                  <span className="text-xl">{icon}</span>
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5 items-center">
-                    <div className="text-xs text-[#605e5c] line-through decoration-[#a4262c]/60">
+                  <span className="text-2xl flex-shrink-0">{icon}</span>
+                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
+                    <div className="text-xs sm:text-sm text-slate-400 line-through decoration-rose-400/70 font-medium">
                       {problem}
                     </div>
-                    <div className="text-xs text-[#107c41] font-semibold flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#107c41]" />
+                    <div className="text-xs sm:text-sm text-emerald-600 font-bold flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0" />
                       {solution}
                     </div>
                   </div>
@@ -124,19 +123,19 @@ export function AboutSection() {
           </div>
 
           {/* Right: Value props */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
             {VALUES.map(({ icon: Icon, title, desc }) => (
               <div
                 key={title}
-                className="p-5 rounded-[4px] bg-white border border-[#d0d4db] hover:border-[#0078d4] hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] transition-all duration-150 group"
+                className="p-6 sm:p-7 rounded-2xl sm:rounded-3xl bg-white border border-slate-200/80 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 hover:-translate-y-1.5 transition-all duration-300 group shadow-xs"
               >
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] bg-[#f0f6ff] border border-[#c7e0f4] text-[#0078d4] mb-3 group-hover:bg-[#0078d4] group-hover:text-white transition-colors">
-                  <Icon className="h-4.5 w-4.5" />
+                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50/90 text-blue-600 ring-1 ring-blue-500/15 mb-4 group-hover:bg-blue-600 group-hover:text-white group-hover:scale-105 transition-all duration-300 shadow-xs">
+                  <Icon className="h-5 w-5" />
                 </div>
-                <h3 className="text-sm font-semibold text-[#201f1e] mb-1.5 group-hover:text-[#0078d4] transition-colors">
+                <h3 className="text-base font-bold text-slate-900 mb-2 group-hover:text-blue-600 transition-colors">
                   {title}
                 </h3>
-                <p className="text-xs text-[#475569] leading-relaxed">
+                <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed">
                   {desc}
                 </p>
               </div>

@@ -65,18 +65,18 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
   return (
     <div
       ref={itemRef}
-      className="border border-[#d0d4db] rounded-[4px] bg-white overflow-hidden shadow-xs hover:border-[#0078d4] transition-colors"
-      style={{ transition: `opacity 0.4s ease ${index * 0.05}s, transform 0.4s ease ${index * 0.05}s, border-color 0.15s` }}
+      className="border border-slate-200/80 rounded-2xl bg-white overflow-hidden shadow-xs hover:border-blue-300/80 hover:shadow-md transition-all duration-200"
+      style={{ transition: `opacity 0.4s ease ${index * 0.05}s, transform 0.4s ease ${index * 0.05}s, border-color 0.2s` }}
     >
       <button
         onClick={() => setOpen(!open)}
         type="button"
-        className="w-full flex items-center justify-between gap-4 px-5 py-3.5 text-left hover:bg-[#f8fafc] transition-colors"
+        className="w-full flex items-center justify-between gap-4 px-6 py-4 text-left hover:bg-slate-50/70 transition-colors"
         aria-expanded={open}
       >
-        <span className="text-xs sm:text-[13px] font-semibold text-[#201f1e]">{q}</span>
+        <span className="text-sm sm:text-base font-bold text-slate-900">{q}</span>
         <ChevronDown
-          className={`h-4 w-4 text-[#0078d4] flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          className={`h-5 w-5 text-blue-600 flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
       </button>
       <div
@@ -84,7 +84,7 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
         className="overflow-hidden transition-all duration-200 ease-in-out"
         style={{ maxHeight: open ? "500px" : "0px", opacity: open ? 1 : 0 }}
       >
-        <div className="px-5 pb-4 text-xs sm:text-[12.5px] text-[#475569] leading-relaxed border-t border-[#e1dfdd] pt-3 bg-[#fbfcfd]">
+        <div className="px-6 pb-5 pt-3 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-slate-100 bg-slate-50/40">
           {a}
         </div>
       </div>
@@ -117,29 +117,28 @@ export function FAQSection() {
   return (
     <section
       id="faqs"
-      className="relative py-20 lg:py-28 bg-white border-b border-[#e1dfdd]"
-      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+      className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
     >
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div
           ref={titleRef}
-          className="text-center mb-12 space-y-3"
+          className="text-center mb-12 sm:mb-14 space-y-3.5"
           style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db] shadow-xs">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0078d4]">FAQ</span>
+          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-blue-50/80 border border-blue-200/60 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">FAQ</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#201f1e] tracking-tight">
-            Common <span className="text-[#0078d4]">Questions</span>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight">
+            Common <span className="text-blue-600">Questions</span>
           </h2>
-          <p className="text-sm sm:text-base text-[#475569]">
+          <p className="text-sm sm:text-base text-slate-600">
             Everything you need to know about Neuron OS.
           </p>
         </div>
 
         {/* FAQ list */}
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           {FAQS.map((faq, index) => (
             <FAQItem key={faq.q} {...faq} index={index} />
           ))}

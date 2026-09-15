@@ -20,17 +20,16 @@ export function FloatingWhatsApp() {
         }`}
       >
         <div
-          className="flex items-center gap-2 px-3.5 py-2 rounded-[4px] bg-white border border-[#d0d4db] shadow-md whitespace-nowrap"
-          style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+          className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/95 backdrop-blur-md border border-slate-200/80 shadow-lg whitespace-nowrap"
         >
-          <span className="h-2 w-2 rounded-full bg-[#107c41]" />
-          <span className="text-xs font-semibold text-[#201f1e]">Chat with Neuron Support</span>
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-semibold text-slate-800">Chat with Neuron Support</span>
           <button
             onClick={(e) => { e.stopPropagation(); setDismissed(true); }}
-            className="ml-1 text-[#8a8886] hover:text-[#201f1e] transition-colors"
+            className="ml-1 text-slate-400 hover:text-slate-600 transition-colors"
             aria-label="Dismiss"
           >
-            <X className="h-3 w-3" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>

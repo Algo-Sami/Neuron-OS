@@ -92,31 +92,33 @@ function TestimonialCard({
   return (
     <div
       ref={cardRef}
-      className="p-5 rounded-[4px] bg-[#f8fafc] border border-[#d0d4db] hover:bg-white hover:border-[#0078d4] hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] transition-all duration-150 flex flex-col gap-3 group"
+      className="p-6 sm:p-7 rounded-2xl sm:rounded-3xl bg-white border border-slate-200/80 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group shadow-xs"
       style={{
-        transition: `opacity 0.5s ease ${index * 0.08}s, transform 0.5s ease ${index * 0.08}s, background-color 0.15s, border-color 0.15s`,
+        transition: `opacity 0.5s ease ${index * 0.08}s, transform 0.5s ease ${index * 0.08}s, box-shadow 0.25s, border-color 0.25s`,
       }}
     >
-      {/* Stars */}
-      <div className="flex gap-0.5">
-        {Array.from({ length: rating }).map((_, i) => (
-          <span key={i} className="text-[#f7630c] text-xs">★</span>
-        ))}
+      <div>
+        {/* Stars */}
+        <div className="flex gap-1 text-amber-400 text-sm">
+          {Array.from({ length: rating }).map((_, i) => (
+            <span key={i}>★</span>
+          ))}
+        </div>
+
+        {/* Review */}
+        <blockquote className="text-xs sm:text-[13.5px] text-slate-600 leading-relaxed flex-1 mt-3.5 mb-4">
+          &ldquo;{review}&rdquo;
+        </blockquote>
       </div>
 
-      {/* Review */}
-      <blockquote className="text-xs text-[#323130] leading-relaxed flex-1">
-        &ldquo;{review}&rdquo;
-      </blockquote>
-
       {/* Author */}
-      <div className="flex items-center gap-2.5 pt-2.5 border-t border-[#e1dfdd]">
-        <div className="h-8 w-8 rounded-[3px] bg-[#0078d4] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+      <div className="flex items-center gap-3 pt-3.5 border-t border-slate-100">
+        <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 shadow-xs ring-2 ring-blue-50">
           {initials}
         </div>
         <div>
-          <div className="text-xs font-semibold text-[#201f1e]">{name}</div>
-          <div className="text-[11px] text-[#605e5c]">{role} · {university}</div>
+          <div className="text-sm font-bold text-slate-800">{name}</div>
+          <div className="text-xs text-slate-500">{role} · {university}</div>
         </div>
       </div>
     </div>
@@ -147,46 +149,47 @@ export function TestimonialsSection() {
 
   return (
     <section
-      className="relative py-20 lg:py-28 bg-white border-b border-[#e1dfdd]"
-      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+      className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div
           ref={titleRef}
-          className="text-center mb-14 space-y-3"
+          className="text-center mb-14 sm:mb-16 space-y-3.5"
           style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[3px] bg-[#f8fafc] border border-[#d0d4db] shadow-xs">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#0078d4]">
+          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-blue-50/80 border border-blue-200/60 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">
               Student Reviews
             </span>
           </div>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#201f1e] tracking-tight">
-            Loved by <span className="text-[#0078d4]">Students</span>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight">
+            Loved by <span className="text-blue-600">Students</span>
           </h2>
-          <p className="text-sm sm:text-base text-[#475569] max-w-xl mx-auto">
+          <p className="text-sm sm:text-base text-slate-600 max-w-xl mx-auto">
             Real feedback from students who transformed their academic workflows with Neuron OS.
           </p>
         </div>
 
         {/* Testimonial grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
           {TESTIMONIALS.map((t, i) => (
             <TestimonialCard key={t.name} {...t} index={i} />
           ))}
         </div>
 
         {/* Bottom trust bar */}
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-6 text-xs text-[#605e5c]">
-          <div className="flex items-center gap-1.5">
-            <span className="flex gap-0.5 text-[#f7630c]">★★★★★</span>
-            <span className="font-semibold text-[#201f1e]">4.9/5 average rating</span>
+        <div className="mt-12 flex justify-center">
+          <div className="inline-flex flex-wrap items-center justify-center gap-5 sm:gap-8 text-xs text-slate-600 bg-slate-50/80 border border-slate-200/80 px-6 py-3 rounded-full shadow-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="flex gap-0.5 text-amber-500 font-bold">★★★★★</span>
+              <span className="font-bold text-slate-800">4.9/5 average rating</span>
+            </div>
+            <div className="h-3.5 w-px bg-slate-300 hidden sm:block" />
+            <div className="font-medium text-slate-700">1,200+ active students</div>
+            <div className="h-3.5 w-px bg-slate-300 hidden sm:block" />
+            <div className="font-medium text-slate-700">10+ universities represented</div>
           </div>
-          <div className="h-3.5 w-px bg-[#d0d4db] hidden sm:block" />
-          <div>1,200+ active students</div>
-          <div className="h-3.5 w-px bg-[#d0d4db] hidden sm:block" />
-          <div>10+ universities represented</div>
         </div>
       </div>
     </section>

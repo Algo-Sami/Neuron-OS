@@ -77,33 +77,32 @@ export function LandingFooter() {
 
   return (
     <footer
-      className="relative bg-[#f8fafc] border-t border-[#e1dfdd]"
-      style={{ fontFamily: '"Segoe UI Variable", "Segoe UI", sans-serif' }}
+      className="relative bg-[#fafbfc] border-t border-slate-200/70"
     >
       {/* CTA Banner */}
-      <div className="relative border-b border-[#e1dfdd] py-14 bg-white">
+      <div className="relative border-b border-slate-200/70 py-16 sm:py-20 bg-gradient-to-b from-white to-slate-50/60">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4">
-          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-[#201f1e] tracking-tight">
-            Ready to Study <span className="text-[#0078d4]">Smarter?</span>
+          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
+            Ready to Study <span className="text-blue-600">Smarter?</span>
           </h2>
-          <p className="text-xs sm:text-sm text-[#475569] max-w-xl mx-auto">
+          <p className="text-xs sm:text-sm md:text-base text-slate-600 max-w-xl mx-auto">
             Join thousands of students who are already using Neuron OS to ace their academics with the power of AI.
           </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
             <Link
               href="/login"
-              className="inline-flex items-center gap-2 px-6 py-2.5 text-xs font-semibold text-white rounded-[3px] bg-[#0078d4] hover:bg-[#106ebe] shadow-xs transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3 text-xs sm:text-sm font-semibold text-white rounded-full bg-blue-600 hover:bg-blue-700 shadow-md shadow-blue-500/25 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
             >
               Start Free Today
-              <ArrowRight className="h-3.5 w-3.5" />
+              <ArrowRight className="h-4 w-4" />
             </Link>
             <a
               href="https://wa.me/923185005228"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-[#107c41] bg-white border border-[#d0d4db] hover:bg-[#f3f2f1] rounded-[3px] transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 text-xs sm:text-sm font-semibold text-emerald-700 bg-white border border-slate-200 hover:bg-emerald-50/50 hover:border-emerald-300 rounded-full shadow-xs hover:-translate-y-0.5 transition-all duration-200"
             >
-              <MessageCircle className="h-3.5 w-3.5" />
+              <MessageCircle className="h-4 w-4 text-emerald-600" />
               WhatsApp Us
             </a>
           </div>
@@ -111,54 +110,54 @@ export function LandingFooter() {
       </div>
 
       {/* Main footer content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
           {/* Brand column */}
           <div className="lg:col-span-2 space-y-4">
             <Link href="/" className="flex items-center gap-2.5 group w-fit">
-              <div className="flex h-7 w-7 items-center justify-center rounded-[3px] bg-[#0078d4] text-white font-bold text-xs shadow-xs">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-xs shadow-xs group-hover:scale-105 transition-transform">
                 N
               </div>
               <div className="flex flex-col leading-none">
-                <span className="text-sm font-semibold tracking-wide text-[#201f1e]">
+                <span className="text-sm font-bold tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors">
                   NEURON OS
                 </span>
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-[#0078d4] leading-none mt-0.5">
+                <span className="text-[9.5px] font-semibold uppercase tracking-wider text-blue-600 leading-none mt-0.5">
                   Academic AI
                 </span>
               </div>
             </Link>
 
-            <p className="text-xs text-[#605e5c] leading-relaxed max-w-xs">
+            <p className="text-xs sm:text-sm text-slate-500 leading-relaxed max-w-xs">
               The AI-powered academic operating system that helps students organize, summarize, and master their coursework.
             </p>
 
             {/* Contact quick-info */}
-            <div className="space-y-1.5 pt-1">
+            <div className="space-y-2 pt-1">
               <a
                 href="mailto:neuronosofficial@gmail.com"
-                className="flex items-center gap-2 text-xs text-[#605e5c] hover:text-[#0078d4] transition-colors"
+                className="flex items-center gap-2.5 text-xs text-slate-600 hover:text-blue-600 transition-colors"
               >
-                <Mail className="h-3.5 w-3.5 text-[#0078d4]" />
+                <Mail className="h-4 w-4 text-blue-600 flex-shrink-0" />
                 neuronosofficial@gmail.com
               </a>
               <a
                 href="https://wa.me/923185005228"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 text-xs text-[#605e5c] hover:text-[#107c41] transition-colors"
+                className="flex items-center gap-2.5 text-xs text-slate-600 hover:text-emerald-600 transition-colors"
               >
-                <MessageCircle className="h-3.5 w-3.5 text-[#107c41]" />
+                <MessageCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
                 +92 318 500 5228
               </a>
-              <div className="flex items-center gap-2 text-xs text-[#605e5c]">
-                <Globe className="h-3.5 w-3.5 text-[#605e5c]" />
+              <div className="flex items-center gap-2.5 text-xs text-slate-600">
+                <Globe className="h-4 w-4 text-slate-400 flex-shrink-0" />
                 Attock, Pakistan
               </div>
             </div>
 
             {/* Social links */}
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2.5 pt-2">
               {SOCIAL_LINKS.map(({ label, href, external, icon, color }) => (
                 <a
                   key={label}
@@ -166,7 +165,7 @@ export function LandingFooter() {
                   target={external ? "_blank" : undefined}
                   rel={external ? "noopener noreferrer" : undefined}
                   aria-label={label}
-                  className={`h-7 w-7 flex items-center justify-center rounded-[3px] bg-white border border-[#d0d4db] text-[#605e5c] transition-colors ${color}`}
+                  className={`h-8 w-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-500 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${color}`}
                 >
                   {icon}
                 </a>
@@ -176,16 +175,16 @@ export function LandingFooter() {
 
           {/* Links columns */}
           {Object.entries(FOOTER_LINKS).map(([title, links]) => (
-            <div key={title} className="space-y-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-[#201f1e]">{title}</h4>
-              <ul className="space-y-2">
+            <div key={title} className="space-y-3.5">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">{title}</h4>
+              <ul className="space-y-2.5">
                 {links.map(({ label, href, hash }) => {
                   if (!hash && !href.startsWith("#")) {
                     return (
                       <li key={label}>
                         <Link
                           href={href}
-                          className="text-xs text-[#605e5c] hover:text-[#0078d4] transition-colors"
+                          className="text-xs sm:text-[13px] text-slate-500 hover:text-blue-600 transition-colors"
                         >
                           {label}
                         </Link>
@@ -197,7 +196,7 @@ export function LandingFooter() {
                       <a
                         href={href}
                         onClick={(e) => handleHashClick(e, href)}
-                        className="text-xs text-[#605e5c] hover:text-[#0078d4] transition-colors"
+                        className="text-xs sm:text-[13px] text-slate-500 hover:text-blue-600 transition-colors"
                       >
                         {label}
                       </a>
@@ -210,11 +209,11 @@ export function LandingFooter() {
         </div>
 
         {/* Bottom bar */}
-        <div className="mt-12 pt-6 border-t border-[#e1dfdd] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#605e5c]">
+        <div className="mt-12 pt-6 border-t border-slate-200/70 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
           <p>© {new Date().getFullYear()} Neuron OS. All rights reserved.</p>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <span>Built with</span>
-            <span className="text-[#a4262c]">♥</span>
+            <span className="text-rose-500">♥</span>
             <span>for students everywhere</span>
           </div>
         </div>
