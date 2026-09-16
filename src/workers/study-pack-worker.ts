@@ -39,6 +39,10 @@ import { resolve } from 'path';
 config({ path: resolve(process.cwd(), '.env.local') });
 config({ path: resolve(process.cwd(), '.env') });
 
+// Polyfill WebSocket for Node.js < 22 (required by @supabase/realtime-js).
+// Railway currently runs Node 18 which has no native WebSocket global.
+import ws from 'ws';
+
 import { Worker, UnrecoverableError, type Job, type WorkerOptions } from 'bullmq';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createDedicatedRedisConnection, closeRedisConnection } from '@/lib/queue/redis';
@@ -91,6 +95,32 @@ function logEvent(
  *
  * Note: SUPABASE_SERVICE_ROLE_KEY must only exist in server-side environments.
  */
+/**
+ * Builds Supabase client options that work on any Node.js version.
+ *
+ * On Node < 22 there is no native WebSocket global, so @supabase/realtime-js
+ * throws "Node.js 18 detected without native WebSocket support" unless we
+ * explicitly supply the `ws` package as the realtime transport.
+ */
+function buildSupabaseOptions() {
+  return {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    realtime: {
+      transport: ws as unknown as typeof WebSocket,
+    },
+  } as const;
+}
+
+/**
+ * Factory: worker-level service-role client.
+ * Bypasses RLS for internal operations (watchdog, lease management).
+ * NOTE: Use the shared singletons (`workerSupabase` / `schedulerSupabase`)
+ * whenever possible — only call this factory directly when you need a
+ * fresh client (e.g., in the job processor where parallelism matters).
+ */
 function createWorkerSupabaseClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -102,27 +132,13 @@ function createWorkerSupabaseClient() {
     );
   }
 
-  return createSupabaseClient(url, serviceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  return createSupabaseClient(url, serviceKey, buildSupabaseOptions());
 }
 
 /**
- * Creates a user-scoped Supabase client for the AIJobScheduler.
- * Uses the anon key with user context to enforce RLS — consistent with
- * the original in-process approach but without needing session tokens
- * in job payloads.
- *
- * We use the service client and set the user JWT context via
- * setSession simulation — or more safely, just use the service client
- * and trust the existing scheduler's per-user data scoping.
- *
- * For Phase 1 we use the service client for the scheduler.
- * The existing scheduler verifies document ownership through
- * Supabase RLS which is enforced at the DB level by user_id checks.
+ * Factory: scheduler-scoped service-role client for the AIJobScheduler.
+ * For Phase 1 we use the service client; the existing scheduler verifies
+ * document ownership through Supabase RLS enforced at the DB level.
  */
 function createSchedulerSupabaseClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -132,12 +148,21 @@ function createSchedulerSupabaseClient() {
     throw new Error('[Worker] Missing Supabase environment variables');
   }
 
-  return createSupabaseClient(url, serviceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  return createSupabaseClient(url, serviceKey, buildSupabaseOptions());
+}
+
+// ─── Shared Singleton Clients ─────────────────────────────────────────────────
+// Re-using a single client across watchdog ticks avoids creating a new
+// WebSocket-backed realtime client every 60 s (the original source of the
+// repeated "Node.js 18 without native WebSocket" noise in Railway logs).
+
+let _workerSupabase: ReturnType<typeof createWorkerSupabaseClient> | null = null;
+
+function getSharedWorkerSupabaseClient() {
+  if (!_workerSupabase) {
+    _workerSupabase = createWorkerSupabaseClient();
+  }
+  return _workerSupabase;
 }
 
 // ─── Job Processor ────────────────────────────────────────────────────────────
@@ -321,7 +346,7 @@ export function startStudyPackWorker(): Worker<StudyPackJobPayload, StudyPackJob
 
 async function runStartupSweep() {
   try {
-    const supabase = createWorkerSupabaseClient();
+    const supabase = getSharedWorkerSupabaseClient();
     logger.info('[Worker] Running startup database reconciliation sweep...');
 
     // 1. Recover any stale locked tasks
@@ -392,9 +417,13 @@ async function runStartupSweep() {
 
 function startPeriodicWatchdog() {
   const WATCHDOG_INTERVAL_MS = 60_000; // Run every 60 seconds
+
+  // Pre-initialize the shared client once so the watchdog never needs to
+  // construct (and therefore never triggers a WebSocket check) on each tick.
+  const supabase = getSharedWorkerSupabaseClient();
+
   watchdogTimer = setInterval(async () => {
     try {
-      const supabase = createWorkerSupabaseClient();
       await JobRecoveryService.recoverStaleJobs(supabase);
     } catch (err) {
       logger.warn('[Worker] Periodic watchdog error:', err);
