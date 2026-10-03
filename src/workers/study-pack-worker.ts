@@ -472,6 +472,22 @@ const isDirectExecution = typeof require !== 'undefined' && require.main === mod
 if (isDirectExecution || process.argv[1]?.includes('study-pack-worker')) {
   startStudyPackWorker();
 
+  // Lightweight HTTP health listener for cloud web hosts (Render, Koyeb, etc.)
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+  if (port) {
+    import('http').then(({ createServer }) => {
+      const server = createServer((req, res) => {
+        const worker = getWorkerInstance();
+        const status = worker ? 'RUNNING' : 'INITIALIZING';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status, timestamp: new Date().toISOString() }));
+      });
+      server.listen(port, () => {
+        logger.info(`[Worker] Cloud health check server listening on port ${port}`);
+      });
+    });
+  }
+
   process.on('SIGTERM', () => stopStudyPackWorker('SIGTERM').then(() => process.exit(0)));
   process.on('SIGINT', () => stopStudyPackWorker('SIGINT').then(() => process.exit(0)));
   process.on('uncaughtException', (err) => {
