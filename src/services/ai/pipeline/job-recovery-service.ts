@@ -250,6 +250,7 @@ export class JobRecoveryService {
       const now = new Date().toISOString();
       const payload: any = {
         status: 'Failed',
+        error_message: errorMessage,
         locked_by: null,
         heartbeat_at: null,
         lock_expires_at: null,
@@ -333,6 +334,7 @@ export class JobRecoveryService {
             .from('background_tasks')
             .update({
               status: 'Failed',
+              error_message: `Maximum retry attempts exceeded after stale worker recovery (${attempts}/${maxAttempts}).`,
               locked_by: null,
               heartbeat_at: null,
               lock_expires_at: null,

@@ -14,19 +14,13 @@
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as fs from 'fs';
-import * as path from 'path';
+import { writeBackgroundLog } from '@/lib/background-logger';
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 
 function logToDisk(context: string, message: string, level: 'INFO' | 'WARN' | 'ERROR' = 'INFO'): void {
-  try {
-    const ts = new Date().toISOString();
-    fs.appendFileSync(
-      path.join(process.cwd(), 'background_logs.txt'),
-      `[${ts}] [BG-AI] [${level}] [${context}] ${message}\n`
-    );
-  } catch { /* silent — never crash on log failure */ }
+  const ts = new Date().toISOString();
+  writeBackgroundLog(`[${ts}] [BG-AI] [${level}] [${context}] ${message}`);
 }
 
 // ── Typed Error Classification ────────────────────────────────────────────────

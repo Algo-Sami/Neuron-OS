@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
 
@@ -51,6 +51,22 @@ export async function GET(req: NextRequest) {
     const supabase = createServiceSupabase();
     const now = Date.now();
 
+    // ── 0. Keepalive Ping for Render Worker (prevents free web service sleep) ───
+    const workerUrl = process.env.RENDER_WORKER_URL || process.env.WORKER_URL || 'https://neuron-worker.onrender.com';
+    let workerPingStatus = 'skipped';
+    if (workerUrl) {
+      try {
+        const pingRes = await fetch(workerUrl, {
+          headers: { 'User-Agent': 'Neuron-Keepalive-Cron/1.0' },
+          signal: AbortSignal.timeout(6000),
+        });
+        workerPingStatus = pingRes.ok ? 'awake' : `status_${pingRes.status}`;
+      } catch (pingErr: any) {
+        workerPingStatus = `ping_error: ${pingErr?.message}`;
+        logger.warn('[StalledJobCheck] Worker keepalive ping warning (worker may be spinning up):', pingErr?.message);
+      }
+    }
+
     // ── 1. Stalled Queued jobs ──────────────────────────────────────────────
     const { data: queuedTasks, error: queuedErr } = await supabase
       .from('background_tasks')
@@ -64,6 +80,8 @@ export async function GET(req: NextRequest) {
 
     const stalledQueued = (queuedTasks ?? []).filter((t) => {
       const heartbeat = t.heartbeat_at ? new Date(t.heartbeat_at).getTime() : 0;
+      // If heartbeat is set to the future, it is an intentionally delayed / backoff job
+      if (heartbeat > now) return false;
       const updated   = t.updated_at   ? new Date(t.updated_at).getTime()   : 0;
       const created   = t.created_at   ? new Date(t.created_at).getTime()   : 0;
       const lastActivity = Math.max(heartbeat, updated, created);
@@ -83,7 +101,10 @@ export async function GET(req: NextRequest) {
 
     const stalledProcessing = (processingTasks ?? []).filter((t) => {
       if (t.heartbeat_at) {
-        return now - new Date(t.heartbeat_at).getTime() > PROCESSING_STALL_THRESHOLD_MS;
+        const hbTime = new Date(t.heartbeat_at).getTime();
+        // If heartbeat is set to the future, it is an intentionally delayed / backoff job
+        if (hbTime > now) return false;
+        return now - hbTime > PROCESSING_STALL_THRESHOLD_MS;
       }
       const updated = t.updated_at ? new Date(t.updated_at).getTime() : 0;
       const created = t.created_at ? new Date(t.created_at).getTime() : 0;

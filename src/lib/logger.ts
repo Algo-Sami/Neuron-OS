@@ -1,4 +1,4 @@
-// Standardized internal logging utility for background tasks
+// Standardized internal logging utility for isomorphic (client + server) logging
 
 export const logger = {
   info: (message: string, meta?: unknown) => {

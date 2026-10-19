@@ -2,8 +2,7 @@ import { routeAIRequest } from '../router';
 import { ContextPackage } from './context-builder';
 import { PipelineValidator } from './context-validator';
 import { logger } from '@/lib/logger';
-import * as fs from 'fs';
-import * as path from 'path';
+import { writeBackgroundLog } from '@/lib/background-logger';
 
 // ── Types and Standard Response Contract ─────────────────────────────────────
 
@@ -762,10 +761,8 @@ ${generatedContent}
     message: string,
     level: 'INFO' | 'WARN' | 'ERROR' = 'INFO'
   ) {
-    try {
-      const ts = new Date().toISOString();
-      const formatted = `[${ts}] [ResponseEngine] [${skillId}] (${level}) ${message}\n`;
-      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), formatted);
-    } catch { /* ignore */ }
+    const ts = new Date().toISOString();
+    const formatted = `[${ts}] [ResponseEngine] [${skillId}] (${level}) ${message}\n`;
+    writeBackgroundLog(formatted);
   }
 }

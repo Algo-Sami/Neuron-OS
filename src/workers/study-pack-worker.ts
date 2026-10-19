@@ -43,13 +43,14 @@ config({ path: resolve(process.cwd(), '.env') });
 // Railway currently runs Node 18 which has no native WebSocket global.
 import ws from 'ws';
 
-import { Worker, UnrecoverableError, type Job, type WorkerOptions } from 'bullmq';
+import { Worker, UnrecoverableError, DelayedError, type Job, type WorkerOptions } from 'bullmq';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createDedicatedRedisConnection, closeRedisConnection } from '@/lib/queue/redis';
 import { QUEUE_NAME, type StudyPackJobPayload, type StudyPackJobResult, classifyError, NonRetryableError } from '@/lib/queue/types';
 import { enqueueStudyPackJob, closeStudyPackQueue } from '@/lib/queue/study-pack-queue';
 import { AIJobScheduler } from '@/services/ai/pipeline/scheduler';
 import { JobRecoveryService } from '@/services/ai/pipeline/job-recovery-service';
+import { RateLimitBackoffError } from '@/lib/rate-limiter';
 import { logger } from '@/lib/logger';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -218,7 +219,37 @@ async function processStudyPackJob(job: Job<StudyPackJobPayload>): Promise<Study
 
   try {
     await scheduler.run(fileUrl, fileType);
-  } catch (err) {
+  } catch (err: unknown) {
+    // Amendment 4: Explicit delayed job handling for AI rate limits
+    if (err instanceof RateLimitBackoffError || (err as any)?.isRateLimitBackoff) {
+      const retryAfterMs = (err as any).retryAfterMs || 15_000;
+      const resumeAt = Date.now() + retryAfterMs;
+
+      logEvent('job_rate_limited_delayed', job.id, job.data, {
+        retryAfterMs,
+        resumeAt: new Date(resumeAt).toISOString(),
+        attempt,
+      });
+
+      // Update background_tasks so stall watchdog recognizes it as scheduled delay
+      if (taskId) {
+        await workerSupabase
+          .from('background_tasks')
+          .update({
+            status: 'Queued',
+            heartbeat_at: new Date(resumeAt).toISOString(),
+            updated_at: new Date().toISOString(),
+            locked_by: null,
+            lock_expires_at: null,
+          })
+          .eq('id', taskId);
+      }
+
+      // Move job to delayed in BullMQ using the job token, followed by DelayedError
+      await job.moveToDelayed(resumeAt, job.token);
+      throw new DelayedError();
+    }
+
     const classified = classifyError(err);
     logEvent('job_error', job.id, job.data, {
       stage: 'scheduler',
@@ -303,14 +334,76 @@ export function startStudyPackWorker(): Worker<StudyPackJobPayload, StudyPackJob
       });
     });
 
-    workerInstance.on('failed', (job, err) => {
-      const isNonRetryable = err instanceof NonRetryableError;
+    workerInstance.on('failed', async (job, err) => {
+      const isNonRetryable =
+        err instanceof UnrecoverableError ||
+        err instanceof NonRetryableError ||
+        (err as any)?.name === 'UnrecoverableError' ||
+        (err as any)?.name === 'NonRetryableError';
+      const attemptsMade = (job?.attemptsMade ?? 0);
+      const maxAttempts = job?.opts?.attempts ?? 3;
+      const willRetry = !isNonRetryable && attemptsMade < maxAttempts;
+
       logEvent('job_failed_event', job?.id, job?.data, {
         error: err.message,
         isNonRetryable,
-        attempt: (job?.attemptsMade ?? 0) + 1,
-        willRetry: !isNonRetryable && (job?.attemptsMade ?? 0) < (job?.opts?.attempts ?? 3) - 1,
+        attempt: attemptsMade,
+        maxAttempts,
+        willRetry,
       });
+
+      // Terminal failure safeguard: If the job will NOT retry and failed before the scheduler
+      // ran (or after all attempts are exhausted), ensure background_tasks and documents
+      // are marked Failed so students do not experience an infinite loading spinner.
+      if (!willRetry && job?.data?.taskId) {
+        try {
+          const workerSupabase = getSharedWorkerSupabaseClient();
+          const { data: existingTask } = await workerSupabase
+            .from('background_tasks')
+            .select('status')
+            .eq('id', job.data.taskId)
+            .maybeSingle();
+
+          if (existingTask && existingTask.status !== 'Failed' && existingTask.status !== 'Completed') {
+            await workerSupabase
+              .from('background_tasks')
+              .update({
+                status: 'Failed',
+                error_message: err.message,
+                locked_by: null,
+                heartbeat_at: null,
+                lock_expires_at: null,
+                completed_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', job.data.taskId);
+
+            logger.error(`[Worker] Terminal failure for task ${job.data.taskId}: marked Failed in DB with message: ${err.message}`);
+          }
+
+          if (job.data.documentId) {
+            await workerSupabase
+              .from('documents')
+              .update({
+                ai_status: 'failed',
+                ai_error_message: err.message,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', job.data.documentId);
+
+            await workerSupabase
+              .from('document_knowledge')
+              .update({
+                status: 'failed',
+                error_message: err.message,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('document_id', job.data.documentId);
+          }
+        } catch (dbErr) {
+          logger.error(`[Worker] on('failed') error updating task ${job.data.taskId} in DB:`, dbErr);
+        }
+      }
     });
 
     workerInstance.on('stalled', (jobId) => {

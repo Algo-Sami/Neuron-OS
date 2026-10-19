@@ -19,11 +19,11 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
+import { writeBackgroundLog } from '@/lib/background-logger';
 import { AssetType, KnowledgeAsset, KnowledgeAssetRegistry } from './knowledge-asset-registry';
 import { isVersionOutdated, getEffectiveVersion, formatVersionLog } from './ai-version-manifest';
 import { JobRecoveryService } from './job-recovery-service';
-import * as fs from 'fs';
-import * as path from 'path';
+
 
 // ── Dependency Graph Definition ────────────────────────────────────────────────
 
@@ -694,10 +694,8 @@ export class AssetGenerationManager {
   // ── Private Disk Logging Helper ───────────────────────────────────────────────
 
   private static logToDisk(message: string, level: 'INFO' | 'WARN' | 'ERROR' = 'INFO') {
-    try {
-      const ts = new Date().toISOString();
-      const line = `[${ts}] [AssetGenerationManager] (${level}) ${message}\n`;
-      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), line);
-    } catch { /* ignore */ }
+    const ts = new Date().toISOString();
+    const line = `[${ts}] [AssetGenerationManager] (${level}) ${message}\n`;
+    writeBackgroundLog(line);
   }
 }

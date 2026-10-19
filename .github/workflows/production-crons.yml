@@ -35,6 +35,13 @@ jobs:
             exit 1
           fi
 
+      - name: Keepalive Render Worker
+        if: github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *' || github.event.inputs.job == 'check-stalled-jobs' || github.event.inputs.job == 'all'
+        run: |
+          WORKER_URL="${{ secrets.RENDER_WORKER_URL || 'https://neuron-worker.onrender.com' }}"
+          echo "Sending keepalive ping to Render worker ($WORKER_URL)..."
+          curl -sSL -m 15 "$WORKER_URL" || echo "Worker ping sent (may be spinning up)"
+
       - name: Finalize Weekly Scores
         if: github.event_name == 'schedule' && github.event.schedule == '55 23 * * 0' || github.event.inputs.job == 'finalize-weekly-scores' || github.event.inputs.job == 'all'
         run: |

@@ -1,16 +1,12 @@
 import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 import { getAIClient, getAIModelName } from '../gemini';
-import * as fs from 'fs';
+import { writeBackgroundLog } from '@/lib/background-logger';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 
 function logToDisk(msg: string) {
-  try {
-    fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), `[PDF_EXTRACTOR] ${msg}\n`);
-  } catch {
-    // silent — avoid crashing or logging ENOENT on container deployments
-  }
+  writeBackgroundLog(`[PDF_EXTRACTOR] ${msg}`);
 }
 
 // Validation Helper

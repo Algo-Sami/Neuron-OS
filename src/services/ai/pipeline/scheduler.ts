@@ -6,9 +6,9 @@ import { EmbeddingService } from './embedding-service';
 import { EmbeddingVerificationService } from './embedding-verification-service';
 import { UserPreferences } from '@/lib/preferences';
 import { logger } from '@/lib/logger';
+import { writeBackgroundLog } from '@/lib/background-logger';
 import { chunkText } from '../chunker';
-import * as fs from 'fs';
-import * as path from 'path';
+
 import { SummarySkillService } from './summary-skill-service';
 import { KeyPointsSkillService } from './key-points-skill-service';
 import { generateSummaryPDF, generateKeyPointsPDF } from '@/services/pdf/study-pack-pdf';
@@ -18,6 +18,7 @@ import { PipelineValidator } from './context-validator';
 import { JobRecoveryService } from './job-recovery-service';
 import { SubjectClassifier } from '@/services/classification/classifier';
 import { ClassificationLearningService } from '@/services/classification/learning-service';
+import { RateLimitBackoffError } from '@/lib/rate-limiter';
 
 export interface SchedulerOptions {
   forceRun?: boolean;
@@ -99,9 +100,7 @@ export class AIJobScheduler {
   private logDisk(stage: string, message: string, level: 'INFO' | 'WARN' | 'ERROR' = 'INFO') {
     const ts = new Date().toISOString();
     const formatted = `[${ts}] [Scheduler] [${this.documentId.substring(0, 8)}] [${stage}] (${level}) ${message}\n`;
-    try {
-      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), formatted);
-    } catch { /* ignore */ }
+    writeBackgroundLog(formatted);
     logger.info(`[Scheduler][${stage}][${level}] ${message}`);
 
     this.logEntries.push({
@@ -1056,6 +1055,17 @@ export class AIJobScheduler {
 
     } catch (err: any) {
       const errMsg = err?.message || String(err);
+
+      // Rate-limit backoffs must propagate to the worker for delayed-job handling
+      // without marking the task as Failed (the worker will set it to Queued).
+      if (
+        err instanceof RateLimitBackoffError ||
+        err?.isRateLimitBackoff === true ||
+        err?.name === 'RateLimitBackoffError'
+      ) {
+        this.logDisk('fatal', `Pipeline pausing for rate-limit backoff: ${errMsg}`, 'WARN');
+        throw err;
+      }
 
       if (errMsg === 'TASK_CANCELLED') {
         this.logDisk('fatal', 'Pipeline aborted — task was cancelled.', 'WARN');

@@ -22,8 +22,8 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
-import * as fs from 'fs';
-import * as path from 'path';
+import { writeBackgroundLog } from '@/lib/background-logger';
+
 import { getEffectiveVersion } from './ai-version-manifest';
 
 // ── Asset Types ───────────────────────────────────────────────────────────────
@@ -638,10 +638,8 @@ export class KnowledgeAssetRegistry {
    * Disk logger for observability without cluttering the main log stream.
    */
   private static logToDisk(message: string, level: 'INFO' | 'WARN' | 'ERROR' = 'INFO') {
-    try {
-      const ts = new Date().toISOString();
-      const line = `[${ts}] [KnowledgeAssetRegistry] (${level}) ${message}\n`;
-      fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), line);
-    } catch { /* ignore */ }
+    const ts = new Date().toISOString();
+    const line = `[${ts}] [KnowledgeAssetRegistry] (${level}) ${message}\n`;
+    writeBackgroundLog(line);
   }
 }
