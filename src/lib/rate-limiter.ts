@@ -22,8 +22,8 @@ export const RATE_LIMIT_CONFIG = {
   globalRpm: Number(process.env.AI_RATE_LIMIT_RPM ?? '4'),
   // Per-student burst ceiling per minute
   userRpm: Number(process.env.USER_RATE_LIMIT_RPM ?? '1'),
-  // Max concurrent background worker calls to Gemini
-  workerMaxConcurrent: Number(process.env.WORKER_MAX_CONCURRENT_AI ?? '1'),
+  // Max concurrent background worker calls to Gemini (supports WORKER_MAX_CONCURRENT_AI or WORKER_MAX_CONCURRENT)
+  workerMaxConcurrent: Number(process.env.WORKER_MAX_CONCURRENT_AI ?? process.env.WORKER_MAX_CONCURRENT ?? '1'),
   // Worker semaphore lease TTL (auto-expires orphaned slots if worker crashes)
   workerLeaseTtlMs: Number(process.env.WORKER_LEASE_TTL_MS ?? '90000'),
   // Window duration
