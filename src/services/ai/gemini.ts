@@ -243,6 +243,9 @@ export async function classifyAcademicDocument(
  * Generates an interactive, conceptual academic quiz from lecture notes text using Gemini.
  * Customizes the prompt based on the required dynamic difficulty.
  */
+/**
+ * @deprecated Legacy direct SDK quiz generator. Migrated to routeAIRequest with taskType: 'quiz-generation'.
+ */
 export async function generateQuizFromText(
   text: string,
   title: string,

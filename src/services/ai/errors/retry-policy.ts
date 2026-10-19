@@ -12,6 +12,7 @@
 import { AIRetryConfig, NormalizedAIError, RetryAttemptLog } from './ai-error-types';
 import { normalizeAIError } from './ai-error-normalizer';
 import { logger } from '@/lib/logger';
+import { acquireAIRateLimitToken, releaseWorkerSlot, RateLimitBackoffError } from '@/lib/rate-limiter';
 
 export const DEFAULT_RETRY_CONFIG: AIRetryConfig = {
   maxAttempts: 4, // 1 initial + 3 retries
@@ -20,12 +21,27 @@ export const DEFAULT_RETRY_CONFIG: AIRetryConfig = {
   defaultCooldownMs: 60000,
 };
 
+export class LocalRateLimitError extends Error {
+  readonly isLocalRateLimit = true;
+  readonly statusCode = 429;
+  readonly retryAfter: number;
+
+  constructor(message: string, retryAfter: number) {
+    super(message);
+    this.name = 'LocalRateLimitError';
+    this.retryAfter = retryAfter;
+  }
+}
+
 export interface RetryContext {
   documentId?: string;
   jobId?: string;
   operation?: string;
   userId?: string;
   providerName?: string;
+  isBackground?: boolean;
+  alreadyAcquired?: boolean;
+  deadlineMs?: number;
 }
 
 export interface RetryCallbacks {
@@ -94,7 +110,34 @@ export async function executeWithAIRetry<T>(
   let lastNormalizedError: NormalizedAIError | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let workerSlotId: string | undefined;
     try {
+      // Acquire rate limit capacity per attempt before hitting the LLM provider
+      const targetUserId = context.userId || (context.isBackground ? 'worker-bg' : 'system');
+      if (!(attempt === 1 && context.alreadyAcquired)) {
+        const rateCheck = await acquireAIRateLimitToken({
+          userId: targetUserId,
+          isBackground: context.isBackground ?? false,
+          operation: context.operation || 'ai_turn',
+        });
+
+        if (!rateCheck.allowed) {
+          if (context.isBackground) {
+            throw new RateLimitBackoffError(
+              `Worker AI rate limit reached. Backing off for ${rateCheck.retryAfterSec || 15}s.`,
+              rateCheck.retryAfterSec || 15
+            );
+          } else {
+            throw new LocalRateLimitError(
+              `AI service is experiencing high demand. Please try again in ${rateCheck.retryAfterSec || 15} seconds.`,
+              rateCheck.retryAfterSec || 15
+            );
+          }
+        }
+
+        workerSlotId = rateCheck.workerSlotId;
+      }
+
       const result = await operationFn(attempt);
 
       if (attempt > 1) {
@@ -111,6 +154,15 @@ export async function executeWithAIRetry<T>(
 
       return result;
     } catch (error: unknown) {
+      // 1. Never retry local rate limiter rejections or worker backoffs (fast fail to preserve client/budget)
+      if (
+        error instanceof RateLimitBackoffError ||
+        (error as any)?.isRateLimitBackoff ||
+        error instanceof LocalRateLimitError ||
+        (error as any)?.isLocalRateLimit
+      ) {
+        throw error;
+      }
       const normalized = normalizeAIError(error, providerName);
       lastNormalizedError = normalized;
 
@@ -154,6 +206,17 @@ export async function executeWithAIRetry<T>(
       // Calculate backoff delay
       const delayMs = calculateBackoffDelay(attempt + 1, normalized, config);
 
+      // Check if function deadline would be exceeded by this backoff delay
+      if (context.deadlineMs && Date.now() + delayMs > context.deadlineMs) {
+        logger.warn(
+          `[AIRetry] Backoff delay (${delayMs}ms) exceeds execution deadline (${context.deadlineMs - Date.now()}ms remaining). Aborting retries to allow clean exit.`
+        );
+        const finalError = error instanceof Error ? error : new Error(String(error));
+        (finalError as any).normalizedAIError = normalized;
+        (finalError as any).exceededDeadline = true;
+        throw finalError;
+      }
+
       logRetryEvent({
         event: 'ai_retry_attempt',
         documentId: context.documentId,
@@ -178,6 +241,12 @@ export async function executeWithAIRetry<T>(
 
       // Wait before next attempt
       await sleep(delayMs);
+    } finally {
+      if (workerSlotId) {
+        await releaseWorkerSlot(workerSlotId).catch((err) => {
+          logger.warn('[AIRetry] Failed to release worker slot immediately:', err);
+        });
+      }
     }
   }
 

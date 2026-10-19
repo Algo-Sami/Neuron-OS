@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { getEmbedding } from './embeddings';
 import { logger } from '@/lib/logger';
-import * as fs from 'fs';
-import * as path from 'path';
+import { writeBackgroundLog } from '@/lib/background-logger';
+
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -58,11 +58,9 @@ function logRetrievalToDisk(data: {
   durationMs: number;
   scores: number[];
 }) {
-  try {
-    const ts = new Date().toISOString();
-    const logMsg = `[${ts}] [RAG Retrieval] Question: "${data.question}" | Docs: ${data.searchedDocCount} | Evaluated: ${data.chunksEvaluatedCount} | Selected: ${data.selectedCount} | Score: ${data.confidenceScore} (${data.confidenceLabel}) | Duration: ${data.durationMs}ms | All Scores: [${data.scores.join(', ')}]\n`;
-    fs.appendFileSync(path.join(process.cwd(), 'background_logs.txt'), logMsg);
-  } catch { /* ignore */ }
+  const ts = new Date().toISOString();
+  const logMsg = `[${ts}] [RAG Retrieval] Question: "${data.question}" | Docs: ${data.searchedDocCount} | Evaluated: ${data.chunksEvaluatedCount} | Selected: ${data.selectedCount} | Score: ${data.confidenceScore} (${data.confidenceLabel}) | Duration: ${data.durationMs}ms | All Scores: [${data.scores.join(', ')}]\n`;
+  writeBackgroundLog(logMsg);
 }
 
 // ── Search Chunks Engine ──────────────────────────────────────────────────────

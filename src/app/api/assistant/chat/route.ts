@@ -4,7 +4,9 @@ import { SchemaType, Schema, Tool } from '@google/generative-ai';
 import { logger } from '@/lib/logger';
 import { searchChunks } from '@/services/ai/search';
 import { getAIClient, getAIModelName } from '@/services/ai/gemini';
-import { routeAIRequest } from '@/services/ai/router';
+import { routeAIRequest, checkUsageAndLog } from '@/services/ai/router';
+import { executeWithAIRetry, DEFAULT_RETRY_CONFIG } from '@/services/ai/errors/retry-policy';
+import { acquireAIRateLimitToken } from '@/lib/rate-limiter';
 import { LECTURE_EXPERT_SYSTEM_INSTRUCTION, buildLectureQAPrompt } from '@/services/ai/agents/lecture-expert';
 
 // -------------------------------------------------------------
@@ -103,8 +105,13 @@ async function getDocumentSummary(userId: string, documentId: string) {
   };
 }
 
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
 async function createReminder(userId: string, title: string, dueDate: string, type: 'assignment' | 'exam' | 'generic') {
   const supabase = await createClient();
+
+  // 1. Attempt direct insert with unique-constraint race protection
   const { data, error } = await supabase
     .from('reminders')
     .insert({
@@ -118,8 +125,49 @@ async function createReminder(userId: string, title: string, dueDate: string, ty
     .select()
     .single();
 
-  if (error) return { error: error.message };
-  return { success: true, reminder: data };
+  if (error) {
+    // If blocked by unique constraint (23505) or duplicate detected, fetch and return existing reminder
+    if (error.code === '23505' || error.message.includes('unique') || error.message.includes('duplicate')) {
+      const { data: existing } = await supabase
+        .from('reminders')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('title', title)
+        .eq('due_date', dueDate)
+        .maybeSingle();
+
+      if (existing) {
+        logger.info(`[createReminder] Atomic deduplication on unique constraint for user ${userId}, title "${title}", due ${dueDate}`);
+        return { success: true, reminder: existing, deduplicated: true };
+      }
+    }
+    return { error: error.message };
+  }
+
+  return { success: true, reminder: data, deduplicated: false };
+}
+
+/**
+ * Acquires rate limit capacity for tool iterations with dynamic bounded wait.
+ * Respects remaining execution budget so serverless function is never killed mid-flight.
+ */
+async function acquireWithBoundedWait(userId: string, maxWaitMs = 10000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const check = await acquireAIRateLimitToken({
+      userId,
+      isBackground: false,
+      operation: 'chat-tool-iteration',
+    });
+    if (check.allowed) return true;
+    const retryDelay = (check.retryAfterSec || 2) * 1000;
+    const waitMs = Math.min(retryDelay, Math.max(500, maxWaitMs - (Date.now() - start)));
+    if (Date.now() - start + waitMs > maxWaitMs) {
+      break;
+    }
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+  return false;
 }
 
 // -------------------------------------------------------------
@@ -127,11 +175,33 @@ async function createReminder(userId: string, title: string, dueDate: string, ty
 // -------------------------------------------------------------
 
 export async function POST(request: Request) {
+  const requestStartTime = Date.now();
+  const FUNCTION_BUDGET_MS = 54_000; // 54s hard limit (6s buffer before Vercel 60s kill)
+  const SAFETY_CLEANUP_MARGIN_MS = 4_000; // 4s buffer to save message to DB and return response
+  const deadlineMs = requestStartTime + FUNCTION_BUDGET_MS - SAFETY_CLEANUP_MARGIN_MS;
+
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 0. Pre-flight Quota & Rate Guard: Block exhausted users BEFORE executing any AI logic
+    const preFlight = await checkUsageAndLog(
+      user.id,
+      getAIModelName(),
+      0,
+      0,
+      0,
+      true // isCheckOnly
+    );
+    if (preFlight.limitExceeded) {
+      logger.warn(`[Chat Route] Request blocked for student ${user.id}: daily AI quota or budget limit exceeded.`);
+      return NextResponse.json(
+        { error: 'Daily AI usage quota or budget limit exceeded. Please wait until quota resets at midnight UTC or upgrade your tier.' },
+        { status: 429 }
+      );
     }
 
     const body = await request.json();
@@ -242,9 +312,13 @@ export async function POST(request: Request) {
     const cleanHistory = firstUserIdx !== -1 ? rawHistory.slice(firstUserIdx) : [];
 
     // 4. Pre-retrieve grounding document contexts (RAG vector search)
+    const phaseTimings: Record<string, number> = {};
+    phaseTimings['auth_preflight_ms'] = Date.now() - requestStartTime;
     const startTime = Date.now();
+    const ragStart = Date.now();
     logger.info(`[RAG] Querying vector database chunks for: "${message}"`);
     const searchResults = await searchChunks(user.id, message, validatedDocumentIds, 5, 0.20);
+    phaseTimings['rag_search_ms'] = Date.now() - ragStart;
     
     interface SourceItem {
       id: string;
@@ -272,6 +346,7 @@ export async function POST(request: Request) {
     }
 
     // 5. Retrieve related concepts from Knowledge Graph (for concept context)
+    const kgStart = Date.now();
     let knowledgeGraphNodes = '';
     try {
       const { data: kgNodes } = await supabase
@@ -288,7 +363,10 @@ export async function POST(request: Request) {
       logger.warn('[Chat Route] Knowledge graph table query bypassed/failed.');
     }
 
+    phaseTimings['kg_query_ms'] = Date.now() - kgStart;
+
     // 6. Retrieve Student Long-Term Memory context
+    const memoryStart = Date.now();
     let memorySummary = '';
     try {
       const [
@@ -316,6 +394,8 @@ Strong in concepts: [${strongList.slice(0, 5).join(', ')}]`;
     } catch {
       logger.warn('[Chat Route] Long-term memory query bypassed/failed.');
     }
+
+    phaseTimings['memory_query_ms'] = Date.now() - memoryStart;
 
     // 7. Construct optimized prompt using Agent Dynamic Prompt Builder
     const optimizedPrompt = buildLectureQAPrompt(
@@ -387,13 +467,77 @@ Strong in concepts: [${strongList.slice(0, 5).join(', ')}]`;
       tools
     });
 
-    let response = await chat.sendMessage(fullPromptText);
-    let calls = response.response.functionCalls();
+    // Helper to log usage per model call turn
+    const logTurnUsage = async (inputLength: number, outputLength: number) => {
+      try {
+        const promptTokensEst = Math.ceil(inputLength / 4);
+        const completionTokensEst = Math.ceil(outputLength / 4);
+        const estimatedCost = ((promptTokensEst / 1000000) * 0.075) + ((completionTokensEst / 1000000) * 0.30);
+        await checkUsageAndLog(
+          user.id,
+          getAIModelName(),
+          promptTokensEst,
+          completionTokensEst,
+          estimatedCost,
+          false // record log in ai_usage_logs
+        );
+      } catch (err) {
+        logger.warn('[Chat Route] Failed to log model turn usage', err);
+      }
+    };
 
-    // Loop to execute tools requested by Gemini
-    while (calls && calls.length > 0) {
+    const limiterStart = Date.now();
+    const rateCheck = await acquireAIRateLimitToken({
+      userId: user.id,
+      isBackground: false,
+      operation: 'chat-initial-turn',
+    });
+    phaseTimings['limiter_acquire_ms'] = Date.now() - limiterStart;
+
+    if (!rateCheck.allowed) {
+      logger.warn(`[Chat Route] Rate limit rejected for user ${user.id}. Retry-After: ${rateCheck.retryAfterSec || 15}s`);
+      return NextResponse.json(
+        {
+          error: `AI service is experiencing high demand. Please try again in ${rateCheck.retryAfterSec || 15} seconds.`,
+          retryAfter: rateCheck.retryAfterSec || 15,
+        },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateCheck.retryAfterSec || 15),
+          },
+        }
+      );
+    }
+
+    const aiCallStart = Date.now();
+    let response = await executeWithAIRetry(
+      () => chat.sendMessage(fullPromptText),
+      {
+        operation: 'chat-initial-turn',
+        userId: user.id,
+        providerName: 'gemini',
+        deadlineMs,
+        alreadyAcquired: true,
+      },
+      undefined,
+      { ...DEFAULT_RETRY_CONFIG, maxAttempts: 3 }
+    );
+    phaseTimings['provider_gemini_call_ms'] = Date.now() - aiCallStart;
+    phaseTimings['ai_initial_turn_total_ms'] = (phaseTimings['limiter_acquire_ms'] || 0) + phaseTimings['provider_gemini_call_ms'];
+    let calls = response.response.functionCalls();
+    const initialText = response.response.candidates?.[0]?.content?.parts?.map(p => ('text' in p ? p.text : '')).join('') || '';
+    await logTurnUsage(fullPromptText.length, initialText.length || 100);
+
+    // Loop to execute tools requested by Gemini (capped at MAX_TOOL_ITERATIONS)
+    const MAX_TOOL_ITERATIONS = 5;
+    let toolIterations = 0;
+    let partialFallbackMessage: string | null = null;
+
+    while (calls && calls.length > 0 && toolIterations < MAX_TOOL_ITERATIONS) {
+      toolIterations++;
       const call = calls[0];
-      logger.info(`Gemini Agent called function: ${call.name} with params:`, call.args);
+      logger.info(`[Chat Route] Gemini Agent tool iteration ${toolIterations}/${MAX_TOOL_ITERATIONS}: ${call.name}`);
 
       let toolResult: unknown = null;
 
@@ -427,19 +571,108 @@ Strong in concepts: [${strongList.slice(0, 5).join(', ')}]`;
         toolResult = await createReminder(user.id, title, dueDate, type as "assignment" | "exam" | "generic");
       }
 
-      response = await chat.sendMessage([
-        {
-          functionResponse: {
-            name: call.name,
-            response: typeof toolResult === 'object' && toolResult !== null ? toolResult as object : { result: toolResult }
-          }
+      const functionResponsePart = {
+        functionResponse: {
+          name: call.name,
+          response: typeof toolResult === 'object' && toolResult !== null ? toolResult as object : { result: toolResult }
         }
-      ]);
+      };
 
+      // Check remaining execution time budget before attempting further tool turns
+      const elapsedMs = Date.now() - requestStartTime;
+      const remainingBudgetMs = FUNCTION_BUDGET_MS - elapsedMs;
+
+      if (remainingBudgetMs <= SAFETY_CLEANUP_MARGIN_MS) {
+        logger.warn(`[Chat Route] Execution budget depleted (${elapsedMs}ms elapsed). Breaking tool loop to prevent mid-flight timeout.`);
+        partialFallbackMessage =
+          call.name === 'createReminder'
+            ? "I created your reminder, but due to time limits, I couldn't generate the full summary. Please feel free to ask me to continue!"
+            : "I processed your request, but due to time limits, I couldn't complete the full follow-up. Everything requested has been saved!";
+        break;
+      }
+
+      // Calculate bounded wait budget dynamically (remaining time minus safety margin, capped at 10s)
+      const allowedWaitMs = Math.min(10_000, remainingBudgetMs - SAFETY_CLEANUP_MARGIN_MS);
+      const toolWaitStart = Date.now();
+      const acquiredCapacity = await acquireWithBoundedWait(user.id, allowedWaitMs);
+      phaseTimings[`tool_${toolIterations}_limiter_wait_ms`] = Date.now() - toolWaitStart;
+
+      if (!acquiredCapacity) {
+        logger.warn(
+          `[Chat Route] Rate limit capacity unavailable after bounded wait (${allowedWaitMs}ms) for user ${user.id} on tool iteration ${toolIterations}. Returning graceful partial response.`
+        );
+        partialFallbackMessage =
+          call.name === 'createReminder'
+            ? "I created your reminder, but due to high service demand, I couldn't generate the full summary. Please feel free to ask me to continue!"
+            : "I processed your request, but due to high service demand, I couldn't complete the full follow-up. Everything requested has been saved!";
+        break;
+      }
+
+      let turnOutput = '';
+      const turnInputLen = JSON.stringify(functionResponsePart).length;
+      const toolAiStart = Date.now();
+
+      try {
+        response = await executeWithAIRetry(
+          async () => {
+            try {
+              return await chat.sendMessage([functionResponsePart]);
+            } catch (err: unknown) {
+              const errorMsg = err instanceof Error ? err.message : String(err);
+              if (errorMsg.includes("Role 'function' is not supported")) {
+                const history = await chat.getHistory();
+                const contents = [
+                  ...history,
+                  {
+                    role: 'user',
+                    parts: [functionResponsePart]
+                  }
+                ];
+                return await model.generateContent({ contents });
+              }
+              throw err;
+            }
+          },
+          {
+            operation: `chat-tool-turn-${toolIterations}`,
+            userId: user.id,
+            providerName: 'gemini',
+            alreadyAcquired: true,
+            deadlineMs,
+          },
+          undefined,
+          { ...DEFAULT_RETRY_CONFIG, maxAttempts: 2 }
+        );
+        phaseTimings[`tool_${toolIterations}_provider_gemini_call_ms`] = Date.now() - toolAiStart;
+        turnOutput = response.response.candidates?.[0]?.content?.parts?.map(p => ('text' in p ? p.text : '')).join('') || '';
+      } catch (err: unknown) {
+        phaseTimings[`tool_${toolIterations}_provider_gemini_call_ms`] = Date.now() - toolAiStart;
+        logger.warn(`[Chat Route] Tool turn ${toolIterations} call failed after retries. Returning graceful partial response:`, err);
+        partialFallbackMessage =
+          call.name === 'createReminder'
+            ? "I created your reminder, but couldn't finish the final response due to high demand."
+            : "I completed your action, but could not finish the final summary due to service load.";
+        break;
+      }
+
+      await logTurnUsage(turnInputLen, turnOutput.length || 100);
       calls = response.response.functionCalls();
     }
 
-    const responseText = response.response.text();
+    if (calls && calls.length > 0 && toolIterations >= MAX_TOOL_ITERATIONS) {
+      logger.warn(`[Chat Route] Reached max tool iterations (${MAX_TOOL_ITERATIONS}) for user ${user.id}. Breaking loop to prevent runaway token spend.`);
+    }
+
+    let responseText = '';
+    if (partialFallbackMessage) {
+      responseText = partialFallbackMessage;
+    } else {
+      try {
+        responseText = response.response.text();
+      } catch {
+        responseText = initialText || "Your request was processed successfully.";
+      }
+    }
 
     let followUps: string[] = [];
     let cleanContent = responseText;
@@ -466,6 +699,9 @@ Strong in concepts: [${strongList.slice(0, 5).join(', ')}]`;
 
     const endTime = Date.now();
     const speedMs = endTime - startTime;
+    phaseTimings['total_request_ms'] = endTime - requestStartTime;
+    phaseTimings['response_assembly_ms'] = endTime - (aiCallStart + (phaseTimings['provider_gemini_call_ms'] || 0));
+    logger.info(`[Chat Route] Phase timings: ${JSON.stringify(phaseTimings)}`);
 
     // 8. Confidence System Metrics Calculations
     const avgSimilarity = sources.length > 0 
@@ -484,22 +720,6 @@ Strong in concepts: [${strongList.slice(0, 5).join(', ')}]`;
     const retrievalQuality = avgSimilarity;
     const sourceCoverage = Math.min(1.0, sources.length / 5);
 
-    // Save to usage log under the router budget system
-    try {
-      const promptTokensEst = Math.ceil((contextString.length + message.length) / 4);
-      const responseTokensEst = Math.ceil(cleanContent.length / 4);
-      const estimatedCost = ((promptTokensEst / 1000000) * 0.075) + ((responseTokensEst / 1000000) * 0.30);
-      
-      await supabase.from('ai_usage_logs').insert({
-        user_id: user.id,
-        model_name: getAIModelName(),
-        prompt_tokens: promptTokensEst,
-        completion_tokens: responseTokensEst,
-        estimated_cost: estimatedCost
-      });
-    } catch {
-      logger.warn('[Chat Route] Failsafe usage log save bypassed.');
-    }
 
     return NextResponse.json({
       content: cleanContent,
@@ -517,6 +737,20 @@ Strong in concepts: [${strongList.slice(0, 5).join(', ')}]`;
 
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
+    const statusCode = (error as any)?.statusCode || ((error as any)?.status === 429 ? 429 : 500);
+    const retryAfter = (error as any)?.retryAfter;
+
+    if (statusCode === 429) {
+      logger.warn(`[Chat Route] Returning 429 to client: ${err.message} (retryAfter: ${retryAfter || 15}s)`);
+      return NextResponse.json(
+        { error: err.message, retryAfter: retryAfter || 15 },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(retryAfter || 15) }
+        }
+      );
+    }
+
     logger.error('Failed to run Agentic AI chat loop', err);
     return NextResponse.json({ error: err.message || 'AI Chat failed' }, { status: 500 });
   }

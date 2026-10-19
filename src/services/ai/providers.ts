@@ -60,6 +60,8 @@ export async function executeAICompletion(
     documentId?: string;
     jobId?: string;
     operation?: string;
+    userId?: string;
+    isBackground?: boolean;
   }
 ): Promise<CompletionResult> {
   const primaryProviderId = detectProvider(primaryModel);
@@ -116,6 +118,8 @@ export async function executeAICompletion(
         {
           documentId: options?.documentId,
           jobId: options?.jobId,
+          userId: options?.userId,
+          isBackground: options?.isBackground ?? false,
           operation: options?.operation || 'completion',
           providerName: attempt.providerId,
         }

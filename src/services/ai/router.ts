@@ -33,6 +33,7 @@ async function createWorkerSafeClient() {
 // Router input parameters
 export interface RouterParams {
   userId: string;
+  isBackground?: boolean;
   taskType: 
     | 'chat' | 'tutoring' | 'concept-explanation' | 'study-coaching' | 'academic-mentoring' // Advanced Route C
     | 'summary' | 'flashcards' | 'note-formatting' | 'key-concepts' | 'quiz-generation' | 'revision-notes' // Lightweight Route B
@@ -167,7 +168,14 @@ async function saveToSemanticCache(query: string, response: string, metadata: an
  * Returns true if the user has exceeded their shutdown budget.
  * Also checks if the model should be downgraded due to warnings.
  */
-async function checkUsageAndLog(
+/**
+ * Checks and logs user quota.
+ *
+ * NOTE: If an unauthenticated or synthetic identifier (e.g. 'system') is passed as userId,
+ * missing profile records and empty log queries cause this function to fail-open (limitExceeded: false),
+ * effectively granting uncapped AI execution. All callers MUST provide authentic, verified user IDs.
+ */
+export async function checkUsageAndLog(
   userId: string,
   modelName: string,
   promptTokens: number,
@@ -321,7 +329,10 @@ export async function routeAIRequest(params: RouterParams): Promise<RouterRespon
       responseMimeType: params.responseMimeType,
       responseSchema: params.responseSchema,
       temperature: params.temperature,
-      maxOutputTokens: params.maxOutputTokens
+      maxOutputTokens: params.maxOutputTokens,
+      userId,
+      isBackground: params.isBackground ?? false,
+      operation: params.taskType,
     });
 
     const latencyMs = Date.now() - startTime;
