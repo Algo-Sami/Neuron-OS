@@ -1,14 +1,17 @@
-import { getAIClient, getAIModelName } from "./gemini";
+import { routeAIRequest } from './router';
 import { logger } from "@/lib/logger";
 
 /**
  * Summarizes the collaborative chat transcript logs into a brief meeting summary.
+ *
+ * Quota charged against: the user who typed /summarize (senderId), not the room host.
+ * This matches the principle that the person who triggers the LLM call pays the quota cost.
+ *
+ * skipCache: true — room discussion transcripts are unique per session and will never produce
+ * a semantically identical query across different rooms or different points in time.
  */
-export async function summarizeRoomDiscussion(messages: string[]): Promise<string> {
+export async function summarizeRoomDiscussion(messages: string[], userId: string): Promise<string> {
   try {
-    const aiClient = getAIClient();
-    const model = aiClient.getGenerativeModel({ model: getAIModelName() });
-
     const prompt = `
       You are "Neuron Meeting Assistant", an expert academic secretary.
       Your task is to analyze the following collaborative study room discussion log and generate a highly structured, beautiful executive meeting summary.
@@ -25,25 +28,37 @@ export async function summarizeRoomDiscussion(messages: string[]): Promise<strin
       4. Keep the summary highly clear, brief, and bulleted. Format in standard clean markdown text.
     `;
 
-    const result = await model.generateContent(prompt);
-    return result.response.text().trim() || "No core summary compiled.";
+    const routerRes = await routeAIRequest({
+      userId,          // The user who typed /summarize — they pay the quota cost
+      taskType: 'summary',
+      prompt,
+      skipCache: true  // Room transcript is unique per session; caching would serve wrong content
+    });
+
+    return routerRes.success
+      ? (routerRes.content || "No core summary compiled.")
+      : "Failed to compile AI meeting summaries. Continue active learning chat!";
   } catch (error) {
-    logger.error("Failed to generate meeting room summary via Gemini", error);
+    logger.error("Failed to generate meeting room summary via AI Router", error);
     return "Failed to compile AI meeting summaries. Continue active learning chat!";
   }
 }
 
 /**
  * Explains a selected concept using context text from the active lecture document.
+ *
+ * Quota charged against: the user who typed /explain <topic> (senderId).
+ *
+ * skipCache: false — topic explanations derived from a stable lecture document are genuinely
+ * reusable. If two students in different rooms ask about "deadlock" from the same OS lecture,
+ * the router can serve the cached explanation, saving cost and latency.
  */
 export async function explainRoomTopic(
   topic: string,
-  lectureSnippet: string
+  lectureSnippet: string,
+  userId: string
 ): Promise<string> {
   try {
-    const aiClient = getAIClient();
-    const model = aiClient.getGenerativeModel({ model: getAIModelName() });
-
     const prompt = `
       You are "Neuron AI Tutor", a world-class university professor.
       A student inside a live collaborative study room has requested an explanation of the topic: "${topic}".
@@ -60,10 +75,18 @@ export async function explainRoomTopic(
       4. Keep the explanation compact, clear, and highly engaging (maximum 3 concise paragraphs).
     `;
 
-    const result = await model.generateContent(prompt);
-    return result.response.text().trim() || "Explanation could not be formulated.";
+    const routerRes = await routeAIRequest({
+      userId,          // The user who typed /explain — they pay the quota cost
+      taskType: 'concept-explanation',
+      prompt
+      // skipCache defaults to false — topic explanations from a stable document are cacheable
+    });
+
+    return routerRes.success
+      ? (routerRes.content || "Explanation could not be formulated.")
+      : `Apologies, I experienced an operational disruption. In simple terms, ${topic} represents a crucial component in computer science and system architecture. Make sure to review your lecture slides!`;
   } catch (error) {
-    logger.error("Failed to explain room topic via Gemini", error);
+    logger.error("Failed to explain room topic via AI Router", error);
     return `Apologies, I experienced an operational disruption. In simple terms, ${topic} represents a crucial component in computer science and system architecture. Make sure to review your lecture slides!`;
   }
 }

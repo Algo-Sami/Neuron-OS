@@ -37,7 +37,7 @@ export async function saveStudyPlanAction(
     // Call Gemini to generate the study plan structure
     const planData = await generateAIStudyPlan({
       ...prefs,
-    });
+    }, userId);
 
     // Save to study_plans table
     const { error: upsertError } = await supabase
@@ -237,8 +237,8 @@ export async function evaluateConceptAction(
       }
     }
 
-    // 3. Call Gemini Concept Evaluation
-    const evaluation = await evaluateConceptAnswer(question, userAnswer, documentContext);
+    // 3. Call Gemini Concept Evaluation — charge quota against the student who submitted the answer
+    const evaluation = await evaluateConceptAnswer(question, userAnswer, documentContext, userId);
 
     // 4. Save into concept_evaluations
     const { data: conceptEval, error: insertError } = await supabase
@@ -404,8 +404,8 @@ async function triggerWeaknessReevaluation(userId: string) {
       return; // No data yet to analyze
     }
 
-    // Call Gemini diagnostic
-    const analysis = await detectWeaknesses(quizzes || [], conceptEvals || []);
+    // Call Gemini diagnostic — charge quota against the user whose data is being analyzed
+    const analysis = await detectWeaknesses(quizzes || [], conceptEvals || [], userId);
 
     // Save or update for each subject analyzed
     for (const [subjName, health] of Object.entries(analysis.academicHealthScores)) {
@@ -506,12 +506,13 @@ export async function getExamReadinessAction(subjectId: string) {
       }
     }
 
-    // 5. Run AI calculation
+    // 5. Run AI calculation — charge quota against the user requesting readiness analysis
     const result = await calculateExamReadiness(
       subject.name,
       quizzes || [],
       weakTrack?.weak_concepts || [],
-      summaries
+      summaries,
+      userId
     );
 
     // 6. Save in exam_readiness
@@ -586,8 +587,8 @@ export async function getProductivityInsightsAction() {
       ...(quizzes || []).map(q => `Completed Quiz on ${new Date(q.created_at).toDateString()}: answered ${q.score}/${q.total_questions} correctly`),
     ];
 
-    // Call Gemini insights generator
-    const result = await generateProductivityInsights(activityLogs);
+    // Call Gemini insights generator — charge quota against the user requesting the insights
+    const result = await generateProductivityInsights(activityLogs, userId);
 
     // Save in DB
     const { data: insightRow, error: upsertError } = await supabase

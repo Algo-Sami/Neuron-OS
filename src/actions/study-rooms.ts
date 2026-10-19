@@ -1,10 +1,12 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { awardXP } from "@/services/gamification/rewards";
 import { incrementWeeklyScore } from "@/services/gamification/weekly-scores";
 import { logger } from "@/lib/logger";
-import { generateQuizFromText } from "@/services/ai/gemini";
+import { routeAIRequest } from "@/services/ai/router";
+import { buildQuizGenerationPrompt, QUIZ_AGENT_SYSTEM_INSTRUCTION, QUIZ_RESPONSE_SCHEMA } from "@/services/ai/agents/quiz";
 import { summarizeRoomDiscussion, explainRoomTopic } from "@/services/ai/study-rooms-ai";
 
 // Alphanumeric code generator (6 characters, uppercase for clean URLs)
@@ -128,7 +130,10 @@ export async function joinStudyRoomAction(code: string) {
 
     if (!existingMember) {
       // Add as standard member
-      const { error: joinError } = await supabase.from("room_members").insert({
+      // For private rooms, the invite code was verified above on the server, so insert via admin client
+      // to bypass the RLS policy that forbids raw unauthenticated/direct UUID self-joins to private rooms.
+      const clientForJoin = room.privacy === "private" ? createAdminClient() : supabase;
+      const { error: joinError } = await clientForJoin.from("room_members").insert({
         room_id: room.id,
         user_id: userId,
         role: "member",
@@ -312,8 +317,8 @@ async function executeRoomSlashCommand(roomId: string, text: string, senderId: s
         if (sums) contextText = sums.summary_text;
       }
 
-      // Generate explain response
-      const explanation = await explainRoomTopic(query, contextText);
+      // Generate explain response — charge quota to the user who invoked /explain
+      const explanation = await explainRoomTopic(query, contextText, senderId);
 
       // Insert message as AI Bot
       await supabase.from("room_messages").insert({
@@ -337,8 +342,11 @@ async function executeRoomSlashCommand(roomId: string, text: string, senderId: s
         return `${name || "Member"}: ${c.message}`;
       }).join("\n") || "";
 
-      // Generate summary
-      const summaryText = await summarizeRoomDiscussion(transcript ? [transcript] : ["No discussion logs yet."]);
+      // Generate summary — charge quota to the user who invoked /summarize
+      const summaryText = await summarizeRoomDiscussion(
+        transcript ? [transcript] : ["No discussion logs yet."],
+        senderId
+      );
 
       // Save summary in db
       await supabase.from("ai_meeting_summaries").insert({
@@ -464,11 +472,41 @@ export async function hostRoomQuizAction(roomId: string, docId: string) {
       .maybeSingle();
     if (sums) context += "\n" + sums.summary_text;
 
-    // 2. Generate 5 MCQ questions from Gemini
-    const questions = await generateQuizFromText(context, doc.title, "medium");
-    
+    // 2. Generate 5 MCQ questions via Centralized AI Request Router
+    const prompt = buildQuizGenerationPrompt(context, doc.title, "medium", undefined, 5);
+    const routerRes = await routeAIRequest({
+      userId, // The room host starting the quiz battle bears the quota cost
+      taskType: "quiz-generation",
+      prompt,
+      systemInstruction: QUIZ_AGENT_SYSTEM_INSTRUCTION,
+      responseSchema: QUIZ_RESPONSE_SCHEMA,
+      responseMimeType: "application/json",
+      skipCache: true // Quiz questions should vary per battle; avoid serving cached identical questions
+    });
+
+    if (!routerRes.success) {
+      throw new Error(`Failed to generate room quiz battle: ${routerRes.content}`);
+    }
+
+    let parsedQuestions: Array<{ type?: string }> = [];
+    try {
+      parsedQuestions = JSON.parse(routerRes.content);
+    } catch {
+      let cleaned = routerRes.content.trim();
+      if (cleaned.startsWith("```json")) {
+        cleaned = cleaned.replace(/^```json/, "").replace(/```$/, "").trim();
+      } else if (cleaned.startsWith("```")) {
+        cleaned = cleaned.replace(/^```/, "").replace(/```$/, "").trim();
+      }
+      parsedQuestions = JSON.parse(cleaned);
+    }
+
     // Slice only the first 5 MCQ questions for fast team battles
-    const battleQuestions = questions.filter(q => q.type === "mcq").slice(0, 5);
+    const battleQuestions = (Array.isArray(parsedQuestions) ? parsedQuestions : [])
+      .filter((q) => q.type === "mcq")
+      .slice(0, 5);
+
+    const questionsToUse = battleQuestions.length > 0 ? battleQuestions : parsedQuestions.slice(0, 5);
 
     // 3. Save inside room_quizzes table
     const { data: roomQuiz, error: insertError } = await supabase
@@ -476,7 +514,7 @@ export async function hostRoomQuizAction(roomId: string, docId: string) {
       .insert({
         room_id: roomId,
         title: `🏆 Group Battle: ${doc.title}`,
-        questions: battleQuestions as unknown as Record<string, unknown>[],
+        questions: questionsToUse as unknown as Record<string, unknown>[],
         status: "in_progress",
         active_question_index: 0,
       })

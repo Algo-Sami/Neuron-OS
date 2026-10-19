@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { 
   getRankName, 
   getXpThresholdForLevel, 
@@ -30,32 +31,6 @@ export type { Achievement, UserProgress };
 const activityStatsCache = new Map<string, { data: any; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache expiry
 
-// 3. Dynamic Seeding of achievements catalog
-export async function ensureAchievementsExist() {
-  const supabase = await createClient();
-  
-  // Fetch existing achievements
-  const { data: existing, error } = await supabase.from('achievements').select('*');
-  if (error) {
-    console.warn("[Gamification] Warning: Failed to query achievements catalog from DB:", error.message);
-    return;
-  }
-  
-  if (!existing || existing.length === 0) {
-    console.log("[Gamification] Achievements table is empty. Seeding catalog...");
-    const { error: seedError } = await supabase.from('achievements').insert(DEFAULT_ACHIEVEMENTS);
-    if (seedError) {
-      console.warn(
-        "[Gamification] Warning: Failed to seed achievements dynamically. " +
-        "This is expected if the RLS INSERT policy is not active on your remote Supabase DB. " +
-        "Admin can seed achievements directly in the Supabase SQL editor using the schema script. " +
-        "Details: " + seedError.message
-      );
-    } else {
-      console.log("[Gamification] Achievements seeded successfully!");
-    }
-  }
-}
 
 // 4. Award XP Action with Level-Up & Achievement Checks
 export async function awardXP(
@@ -72,10 +47,10 @@ export async function awardXP(
 ) {
   // Invalidate cache when user performs an action
   activityStatsCache.delete(userId);
-  const supabase = await createClient();
+  const admin = createAdminClient();
   
   // Verify/create user_progress row
-  const { data: progressVal, error: fetchError } = await supabase
+  const { data: progressVal, error: fetchError } = await admin
     .from('user_progress')
     .select('*')
     .eq('user_id', userId)
@@ -89,7 +64,7 @@ export async function awardXP(
   let progress = progressVal;
   
   if (!progress) {
-    const { data: newProgress, error: insertError } = await supabase
+    const { data: newProgress, error: insertError } = await admin
       .from('user_progress')
       .insert({ user_id: userId, total_xp: 0, monthly_xp: 0, current_level: 1 })
       .select()
@@ -225,7 +200,7 @@ export async function awardXP(
     updated_at: new Date().toISOString()
   };
 
-  let updateQuery = supabase
+  let updateQuery = admin
     .from('user_progress')
     .update(updatePayload)
     .eq('user_id', userId);
@@ -233,7 +208,7 @@ export async function awardXP(
   if (details?.lastCheckInDate) {
     updatePayload.last_check_in_date = details.lastCheckInDate;
     // Guard against race conditions: only update if last_check_in_date is not already today
-    updateQuery = supabase
+    updateQuery = admin
       .from('user_progress')
       .update(updatePayload)
       .eq('user_id', userId)
@@ -262,7 +237,7 @@ export async function awardXP(
   }
   
   // Insert log notification for points earned
-  await supabase.from('notifications').insert({
+  await admin.from('notifications').insert({
     user_id: userId,
     title: `+${pointsAwarded} XP Earned!`,
     message: `You earned ${pointsAwarded} XP for ${actionLabel}.`,
@@ -271,7 +246,7 @@ export async function awardXP(
 
   // Daily Challenge completed notification
   if (challengeBonusXP > 0) {
-    await supabase.from('notifications').insert({
+    await admin.from('notifications').insert({
       user_id: userId,
       title: challengeAlert,
       message: `Completed daily challenge activity. Received +${challengeBonusXP} bonus XP!`,
@@ -281,7 +256,7 @@ export async function awardXP(
   
   // Insert level-up notification
   if (hasLeveledUp) {
-    await supabase.from('notifications').insert({
+    await admin.from('notifications').insert({
       user_id: userId,
       title: "🎉 Level Up!",
       message: `Congratulations! You leveled up to Level ${currentLevel} and reached rank: ${getRankName(currentLevel)}!`,
@@ -310,28 +285,26 @@ async function checkAndTriggerAchievements(
   details: { score?: number; totalQuestions?: number; levelReached?: number; count?: number } | undefined,
   currentLevel: number
 ): Promise<string[]> {
-  const supabase = await createClient();
+  const admin = createAdminClient();
   const unlockedAchievements: string[] = [];
   
-  // Ensure we have seeded achievements
-  await ensureAchievementsExist();
-  
-  // Fetch user achievements mapped already
-  const { data: unlockedRows } = await supabase
+  // Fetch user achievements mapped already for this user
+  const { data: unlockedRows } = await admin
     .from('user_achievements')
-    .select('achievement_id');
+    .select('achievement_id')
+    .eq('user_id', userId);
   const unlockedIds = new Set(unlockedRows?.map(r => r.achievement_id) || []);
   
   // Fetch all achievements from catalog
-  const { data: catalog } = await supabase.from('achievements').select('*');
+  const { data: catalog } = await admin.from('achievements').select('*');
   if (!catalog) return [];
   
   const tryUnlock = async (achievementName: string) => {
     const ach = catalog.find(a => a.name === achievementName);
     if (!ach || unlockedIds.has(ach.id)) return;
     
-    // Unlock achievement!
-    const { error: unlockError } = await supabase.from('user_achievements').insert({
+    // Unlock achievement via admin client
+    const { error: unlockError } = await admin.from('user_achievements').insert({
       user_id: userId,
       achievement_id: ach.id,
       unlocked_at: new Date().toISOString()
@@ -340,17 +313,17 @@ async function checkAndTriggerAchievements(
     if (!unlockError) {
       unlockedAchievements.push(achievementName);
       // Award reward XP for the achievement!
-      const { data: prog } = await supabase.from('user_progress').select('total_xp, monthly_xp').eq('user_id', userId).single();
+      const { data: prog } = await admin.from('user_progress').select('total_xp, monthly_xp').eq('user_id', userId).single();
       const currentXp = prog?.total_xp || 0;
       const currentMonthlyXp = prog?.monthly_xp || 0;
-      await supabase.from('user_progress').update({
+      await admin.from('user_progress').update({
         total_xp: currentXp + ach.xp_reward,
         monthly_xp: currentMonthlyXp + ach.xp_reward,
         updated_at: new Date().toISOString()
       }).eq('user_id', userId);
       
       // Notify user
-      await supabase.from('notifications').insert({
+      await admin.from('notifications').insert({
         user_id: userId,
         title: `🏆 Badge Unlocked: ${ach.name}!`,
         message: `Unlocked: "${ach.description}". You received a bonus +${ach.xp_reward} XP!`,
@@ -361,7 +334,7 @@ async function checkAndTriggerAchievements(
   
   // Check conditions based on trigger actions
   if (actionType === 'upload_notes') {
-    const { count: docCount } = await supabase
+    const { count: docCount } = await admin
       .from('documents')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
@@ -405,7 +378,12 @@ export async function getDynamicActivityStats(userId: string) {
     return cached.data;
   }
 
-  const supabase = await createClient();
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch {
+    supabase = createAdminClient();
+  }
   
   // Ninety days ago ISO string to restrict DB queries payload
   const ninetyDaysAgo = new Date();

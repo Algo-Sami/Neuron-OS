@@ -111,18 +111,20 @@ interface SubjectAnalysisItem {
 export async function evaluateConceptAnswer(
   question: string,
   userAnswer: string,
-  documentText: string
+  documentText: string,
+  userId: string
 ): Promise<ConceptEvaluationResult> {
   try {
     const prompt = buildConceptEvalPrompt(question, userAnswer, documentText);
 
     logger.info('[Study Coach] Rerouting concept evaluation to AI Router...');
     const routerRes = await routeAIRequest({
-      userId: 'system', // Router checks usage logic
+      userId, // Real authenticated user — quota enforced against them
       taskType: 'tutoring', // Route C Premium model
       prompt,
       responseMimeType: 'application/json',
-      responseSchema: CONCEPT_EVALUATION_RESPONSE_SCHEMA
+      responseSchema: CONCEPT_EVALUATION_RESPONSE_SCHEMA,
+      skipCache: true // Evaluation output is unique per student answer; caching would return stale scores
     });
 
     if (!routerRes.success) {
@@ -145,14 +147,15 @@ export async function evaluateConceptAnswer(
 
 // 2. AI STUDY PLANNER
 export async function generateAIStudyPlan(
-  params: StudyPlannerParams
+  params: StudyPlannerParams,
+  userId: string
 ): Promise<StudyPlanData> {
   try {
     const prompt = buildStudyPlannerPrompt(params);
 
     logger.info('[Study Coach] Rerouting study planner to AI Router...');
     const routerRes = await routeAIRequest({
-      userId: 'system',
+      userId, // Real authenticated user — quota enforced against them
       taskType: 'study-coaching', // Route C Premium model
       prompt,
       responseMimeType: 'application/json',
@@ -189,7 +192,8 @@ export async function generateAIStudyPlan(
 // 3. WEAKNESS DETECTION & ACADEMIC HEALTH
 export async function detectWeaknesses(
   quizHistory: QuizHistoryItem[],
-  conceptEvaluations: ConceptEvaluationItem[]
+  conceptEvaluations: ConceptEvaluationItem[],
+  userId: string
 ): Promise<WeaknessDetectionResult> {
   try {
     const cleanQuizHistory = quizHistory.map(q => ({ title: q.title, score: q.score, total: q.total_questions, date: q.created_at }));
@@ -199,7 +203,7 @@ export async function detectWeaknesses(
 
     logger.info('[Study Coach] Rerouting weakness detection to AI Router...');
     const routerRes = await routeAIRequest({
-      userId: 'system',
+      userId, // Real authenticated user — quota enforced against them
       taskType: 'analytics-calc', // Route A locally or cheap Route B
       prompt,
       responseMimeType: 'application/json',
@@ -251,7 +255,8 @@ export async function calculateExamReadiness(
   subjectName: string,
   quizAttempts: QuizHistoryItem[],
   weakAreas: string[],
-  referenceSummaries: string[]
+  referenceSummaries: string[],
+  userId: string
 ): Promise<ExamReadinessResult> {
   try {
     const prompt = `
@@ -276,10 +281,11 @@ export async function calculateExamReadiness(
 
     logger.info('[Study Coach] Rerouting exam readiness to AI Router...');
     const routerRes = await routeAIRequest({
-      userId: 'system',
+      userId, // Real authenticated user — quota enforced against them
       taskType: 'academic-mentoring', // Route C Premium model
       prompt,
-      responseMimeType: 'application/json'
+      responseMimeType: 'application/json',
+      skipCache: true // Readiness is time-sensitive; cached scores from days ago would be actively misleading
     });
 
     if (!routerRes.success) {
@@ -302,7 +308,8 @@ export async function calculateExamReadiness(
 
 // 5. PRODUCTIVITY INSIGHTS & MOTIVATION
 export async function generateProductivityInsights(
-  recentActivityLogs: unknown[]
+  recentActivityLogs: unknown[],
+  userId: string
 ): Promise<ProductivityInsightsResult> {
   try {
     const prompt = `
@@ -323,10 +330,11 @@ export async function generateProductivityInsights(
 
     logger.info('[Study Coach] Rerouting productivity insights to AI Router...');
     const routerRes = await routeAIRequest({
-      userId: 'system',
+      userId, // Real authenticated user — quota enforced against them
       taskType: 'study-coaching', // Route C Premium model
       prompt,
-      responseMimeType: 'application/json'
+      responseMimeType: 'application/json',
+      skipCache: true // Activity logs change daily; a cached response from yesterday's session data is wrong
     });
 
     if (!routerRes.success) {

@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getDynamicActivityStats, ensureAchievementsExist } from "@/services/gamification/rewards";
+import { getDynamicActivityStats } from "@/services/gamification/rewards";
 import { ProfileClient, BadgeItem } from "@/components/profile/profile-client";
 import { ProfileCompletionChecklist } from "@/components/profile/profile-completion-modal";
 import { getProfileCompletionData } from "@/actions/profile";
@@ -17,9 +17,6 @@ export default async function ProfilePage() {
   if (authError || !user) {
     redirect("/login");
   }
-
-  // Ensure achievements catalog exists
-  await ensureAchievementsExist();
 
   // 1. Fetch profiles table record
   let { data: profile } = await supabase

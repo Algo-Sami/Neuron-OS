@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { 
-  ensureAchievementsExist, 
   getDynamicActivityStats, 
   DEFAULT_ACHIEVEMENTS
 } from "@/services/gamification/rewards";
@@ -73,8 +72,6 @@ export default async function LeaderboardPage() {
     redirect("/login");
   }
 
-  // 2. Fire-and-forget achievements check — never block page render
-  ensureAchievementsExist().catch(() => {});
 
   // ─── BATCH 1: Parallel — profile + progress + activity stats ─────────────
   const [profileResult, progressResult, activityStats] = await Promise.all([
