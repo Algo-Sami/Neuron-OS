@@ -109,7 +109,10 @@ async function main() {
 
   try {
     console.log('\n--- TEST 1: ANONYMOUS ACCESS TO PUBLIC_PROFILES ---');
-    const { data: anonData, error: anonErr } = await anonClient
+    const pureAnonClient = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    const { data: anonData, error: anonErr } = await pureAnonClient
       .from('public_profiles')
       .select('*')
       .limit(5);
@@ -168,14 +171,18 @@ async function main() {
 
     console.log('\n--- TEST 5: SHARED STUDY ROOM PEER VISIBILITY ---');
     // Create a study room, add User A and User B to the same room
-    const { data: testRoom } = await admin.from('study_rooms').insert({
-      title: 'Peer Test Room',
-      code: `RM${runId.toString().slice(-4)}`,
-      host_id: userAId,
-      is_private: false
+    const roomCode = `RM${runId.toString().slice(-6)}`;
+    const { data: testRoom, error: roomErr } = await admin.from('study_rooms').insert({
+      user_id: userAId,
+      name: 'Peer Test Room',
+      topic: 'Algorithm Analysis',
+      code: roomCode,
+      privacy: 'public'
     }).select().single();
 
-    if (testRoom) {
+    if (roomErr || !testRoom) {
+      fail(`Could not create test study room: ${roomErr?.message}`);
+    } else {
       await admin.from('room_members').insert([
         { room_id: testRoom.id, user_id: userAId, role: 'host' },
         { room_id: testRoom.id, user_id: userBId, role: 'member' }

@@ -14,6 +14,7 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 -- Drop existing permissive SELECT policies
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
 DROP POLICY IF EXISTS "Anyone can view profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Authenticated users can view profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Profiles are viewable by users who created them" ON public.profiles;
 DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 
