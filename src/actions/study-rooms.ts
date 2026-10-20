@@ -172,10 +172,28 @@ export async function getActiveRoomsAction() {
     // Fetch active rooms
     const { data: rooms, error } = await supabase
       .from("study_rooms")
-      .select("*, subjects(name, code, color), profiles(first_name, last_name)")
+      .select("*, subjects(name, code, color)")
       .order("created_at", { ascending: false });
 
     if (error) throw error;
+
+    // Lookup host profiles from public_profiles view (safe peer visibility)
+    const hostIds = Array.from(new Set(rooms?.map((r) => r.host_id))).filter(Boolean);
+    const hostMap = new Map<string, { first_name?: string | null; last_name?: string | null }>();
+    if (hostIds.length > 0) {
+      const { data: hostProfiles } = await supabase
+        .from("public_profiles")
+        .select("id, first_name, last_name")
+        .in("id", hostIds);
+      if (hostProfiles) {
+        hostProfiles.forEach((h) => hostMap.set(h.id, h));
+      }
+    }
+
+    const populatedRooms = (rooms || []).map((r) => ({
+      ...r,
+      profiles: hostMap.get(r.host_id) || { first_name: "Host", last_name: "" },
+    }));
 
     // Fetch rooms where current user is a member
     const { data: memberRows } = await supabase
@@ -185,7 +203,7 @@ export async function getActiveRoomsAction() {
     
     const myJoinedIds = new Set(memberRows?.map(r => r.room_id) || []);
 
-    return { success: true, rooms: rooms || [], myJoinedRoomIds: Array.from(myJoinedIds) };
+    return { success: true, rooms: populatedRooms, myJoinedRoomIds: Array.from(myJoinedIds) };
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     return { success: false, error: err.message };
@@ -218,14 +236,32 @@ export async function getRoomDetailsAction(code: string) {
     // Fetch room active members
     const { data: members } = await supabase
       .from("room_members")
-      .select("*, profiles(first_name, last_name, avatar_url)")
+      .select("*")
       .eq("room_id", room.id);
+
+    // Lookup member profiles via public_profiles view (safe room peers)
+    const memberUserIds = Array.from(new Set(members?.map((m) => m.user_id))).filter(Boolean);
+    const memberProfileMap = new Map<string, { first_name?: string | null; last_name?: string | null; avatar_url?: string | null }>();
+    if (memberUserIds.length > 0) {
+      const { data: memberProfiles } = await supabase
+        .from("public_profiles")
+        .select("id, first_name, last_name, avatar_url")
+        .in("id", memberUserIds);
+      if (memberProfiles) {
+        memberProfiles.forEach((p) => memberProfileMap.set(p.id, p));
+      }
+    }
+
+    const populatedMembers = (members || []).map((m) => ({
+      ...m,
+      profiles: memberProfileMap.get(m.user_id) || null,
+    }));
 
     return { 
       success: true, 
       room, 
       notes: notes || null, 
-      members: members || [],
+      members: populatedMembers,
       currentUserId: userId 
     };
   } catch (error: unknown) {
@@ -240,13 +276,32 @@ export async function getRoomMessagesAction(roomId: string) {
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("room_messages")
-      .select("*, profiles(first_name, last_name, avatar_url)")
+      .select("*")
       .eq("room_id", roomId)
       .order("created_at", { ascending: true })
       .limit(50);
 
     if (error) throw error;
-    return { success: true, messages: data };
+
+    // Lookup message sender profiles via public_profiles view
+    const msgUserIds = Array.from(new Set(data?.map((m) => m.user_id))).filter(Boolean);
+    const msgProfileMap = new Map<string, { first_name?: string | null; last_name?: string | null; avatar_url?: string | null }>();
+    if (msgUserIds.length > 0) {
+      const { data: msgProfiles } = await supabase
+        .from("public_profiles")
+        .select("id, first_name, last_name, avatar_url")
+        .in("id", msgUserIds);
+      if (msgProfiles) {
+        msgProfiles.forEach((p) => msgProfileMap.set(p.id, p));
+      }
+    }
+
+    const populatedMessages = (data || []).map((m) => ({
+      ...m,
+      profiles: msgProfileMap.get(m.user_id) || null,
+    }));
+
+    return { success: true, messages: populatedMessages };
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     return { success: false, error: err.message };
@@ -523,16 +578,10 @@ export async function hostRoomQuizAction(roomId: string, docId: string) {
 
     if (insertError) throw insertError;
 
-    // 4. Send Bot Alert in chat
-    const { data: systemUser } = await supabase
-      .from("profiles")
-      .select("id")
-      .limit(1)
-      .single();
-
+    // 4. Send Alert in chat
     await supabase.from("room_messages").insert({
       room_id: roomId,
-      user_id: systemUser?.id || userId,
+      user_id: userId,
       message: `🏆 [AI Quiz Battle Started!]\n\n"${roomQuiz.title}" has been launched! Head over to the "Quiz Battle" tab in the left panel to submit your answers and earn maximum XP points!`,
     });
 

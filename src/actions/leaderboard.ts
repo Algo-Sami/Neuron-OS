@@ -93,7 +93,7 @@ export async function getCohortLeaderboard(
       const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
       
       const { data: profiles, error: pError } = await supabase
-        .from("profiles")
+        .from("public_profiles")
         .select("id, first_name, last_name, avatar_url, university, major, leaderboard_visibility")
         .in("id", userIds);
 

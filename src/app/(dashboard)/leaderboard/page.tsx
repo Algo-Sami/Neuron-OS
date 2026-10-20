@@ -122,18 +122,18 @@ export default async function LeaderboardPage() {
     major: profile?.major || "Computer Science"
   };
 
-  // ─── BATCH 2: Parallel — achievements + leaderboard + champions + docs ────
+  // ─── BATCH 2: Parallel — achievements + leaderboard progress + champions + docs ────
   const [
     dbAchievementsResult,
     unlockedRowsResult,
-    rawUsersResult,
+    rawProgressResult,
     rawChampionsResult,
     completedDocsResult,
   ] = await Promise.all([
     supabase.from("achievements").select("*").order("xp_reward", { ascending: true }),
     supabase.from("user_achievements").select("achievement_id").eq("user_id", user.id),
-    supabase.from("profiles").select(`id, first_name, last_name, avatar_url, university, major, user_progress(total_xp, monthly_xp, current_level, quiz_accuracy, current_streak)`),
-    supabase.from("monthly_champions").select(`rank, total_xp, user_id, profiles:user_id(first_name, last_name), leaderboard_seasons:season_id(season_name)`).order("created_at", { ascending: false }),
+    supabase.from("user_progress").select("user_id, total_xp, monthly_xp, current_level, quiz_accuracy, current_streak").order("total_xp", { ascending: false }).limit(50),
+    supabase.from("monthly_champions").select(`rank, total_xp, user_id, leaderboard_seasons:season_id(season_name)`).order("created_at", { ascending: false }),
     supabase.from("documents").select("id, title").eq("user_id", user.id).eq("summary_status", "completed"),
   ]);
 
@@ -141,22 +141,39 @@ export default async function LeaderboardPage() {
   const achievements = dbAchievements && dbAchievements.length > 0 ? dbAchievements : DEFAULT_ACHIEVEMENTS;
   const unlockedAchievementIds = unlockedRowsResult.data?.map(r => r.achievement_id) || [];
 
-  const leaderboardList = ((rawUsersResult.data as unknown as RawUser[]) || []).map((u) => {
-    const progressData = u.user_progress
-      ? (Array.isArray(u.user_progress) ? u.user_progress[0] : u.user_progress)
-      : null;
+  // Safe lookup of participant profiles from public_profiles view
+  const progressRows = rawProgressResult.data || [];
+  const championRows = rawChampionsResult.data || [];
+  const profileUserIds = Array.from(new Set([
+    ...progressRows.map(p => p.user_id),
+    ...championRows.map(c => c.user_id)
+  ])).filter(Boolean);
+
+  const profileMap = new Map<string, { first_name?: string | null; last_name?: string | null; avatar_url?: string | null; university?: string | null; major?: string | null }>();
+  if (profileUserIds.length > 0) {
+    const { data: publicProfiles } = await supabase
+      .from("public_profiles")
+      .select("id, first_name, last_name, avatar_url, university, major")
+      .in("id", profileUserIds);
+    if (publicProfiles) {
+      publicProfiles.forEach(p => profileMap.set(p.id, p));
+    }
+  }
+
+  const leaderboardList = progressRows.map((prog) => {
+    const p = profileMap.get(prog.user_id);
     return {
-      user_id: u.id,
-      total_xp: progressData?.total_xp || 0,
-      monthly_xp: progressData?.monthly_xp || 0,
-      current_level: progressData?.current_level || 1,
-      quiz_accuracy: progressData?.quiz_accuracy || 0,
-      current_streak: progressData?.current_streak || 0,
-      first_name: u.first_name || `Student_${u.id.substring(0, 4)}`,
-      last_name: u.last_name || "",
-      avatar_url: u.avatar_url || null,
-      university: u.university || "Neuron Academy",
-      major: u.major || "Computer Science"
+      user_id: prog.user_id,
+      total_xp: prog.total_xp || 0,
+      monthly_xp: prog.monthly_xp || 0,
+      current_level: prog.current_level || 1,
+      quiz_accuracy: prog.quiz_accuracy || 0,
+      current_streak: prog.current_streak || 0,
+      first_name: p?.first_name || `Student_${prog.user_id.substring(0, 4)}`,
+      last_name: p?.last_name || "",
+      avatar_url: p?.avatar_url || null,
+      university: p?.university || "Neuron Academy",
+      major: p?.major || "Computer Science"
     };
   });
 
@@ -164,15 +181,15 @@ export default async function LeaderboardPage() {
     leaderboardList.push(userProgress);
   }
 
-  const championsArchive = ((rawChampionsResult.data as unknown as RawChampion[]) || []).map((c) => {
-    const profileData = Array.isArray(c.profiles) ? c.profiles[0] : c.profiles;
+  const championsArchive = championRows.map((c) => {
+    const p = profileMap.get(c.user_id);
     const seasonData = Array.isArray(c.leaderboard_seasons) ? c.leaderboard_seasons[0] : c.leaderboard_seasons;
     return {
       rank: c.rank,
       total_xp: c.total_xp,
       season_name: seasonData?.season_name || "Past Season",
-      first_name: profileData?.first_name || "Scholar",
-      last_name: profileData?.last_name || "Student"
+      first_name: p?.first_name || "Scholar",
+      last_name: p?.last_name || "Student"
     };
   });
 

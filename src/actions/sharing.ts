@@ -175,11 +175,7 @@ export async function getCohortSharedFiles(cohortId?: string | null): Promise<Ac
         file_url,
         shared_at,
         user_id,
-        size,
-        profiles:user_id (
-          first_name,
-          last_name
-        )
+        size
       `)
       .eq("is_shared", true)
       .eq("shared_cohort_id", cohortId)
@@ -192,6 +188,19 @@ export async function getCohortSharedFiles(cohortId?: string | null): Promise<Ac
 
     if (!docs || docs.length === 0) {
       return { success: true, data: [] }
+    }
+
+    // Lookup author profiles via public_profiles view (safe peer visibility)
+    const profileMap = new Map<string, { first_name?: string | null; last_name?: string | null }>();
+    const docAuthorIds = Array.from(new Set(docs.map((d) => d.user_id))).filter(Boolean);
+    if (docAuthorIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from("public_profiles")
+        .select("id, first_name, last_name")
+        .in("id", docAuthorIds);
+      if (profiles) {
+        profiles.forEach((p) => profileMap.set(p.id, p));
+      }
     }
 
     // Generate short-lived signed URLs for each shared document
@@ -209,10 +218,9 @@ export async function getCohortSharedFiles(cohortId?: string | null): Promise<Ac
         }
       }
 
-      // Supabase returns related profile as an object or array depending on relation
-      const prof = Array.isArray(doc.profiles) ? doc.profiles[0] : doc.profiles
-      const firstName = (prof as { first_name?: string | null } | null)?.first_name || ""
-      const lastName = (prof as { last_name?: string | null } | null)?.last_name || ""
+      const prof = profileMap.get(doc.user_id)
+      const firstName = prof?.first_name || ""
+      const lastName = prof?.last_name || ""
       const authorName = `${firstName} ${lastName}`.trim() || "Classmate"
 
       const fileItem: CohortSharedFile = {
