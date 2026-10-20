@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { getProfileCompletion } from "@/lib/profile-completion";
 
@@ -123,7 +124,8 @@ export async function signUpAndOnboard(fields: {
   try {
     const firstName = fields.fullName.split(" ")[0] || "Scholar";
     const lastName = fields.fullName.split(" ").slice(1).join(" ") || "Student";
-    const { error: profileError } = await supabase
+    const admin = createAdminClient();
+    const { error: profileError } = await admin
       .from("profiles")
       .update({
         first_name: firstName,

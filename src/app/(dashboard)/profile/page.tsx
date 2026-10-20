@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getDynamicActivityStats } from "@/services/gamification/rewards";
 import { ProfileClient, BadgeItem } from "@/components/profile/profile-client";
 import { ProfileCompletionChecklist } from "@/components/profile/profile-completion-modal";
@@ -27,7 +28,8 @@ export default async function ProfilePage() {
 
   if (!profile) {
     // Graceful creation if auth trigger was delayed or missing in some environments
-    const { data: newProfile } = await supabase
+    const admin = createAdminClient();
+    const { data: newProfile } = await admin
       .from("profiles")
       .insert({
         id: user.id,

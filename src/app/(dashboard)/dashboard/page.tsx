@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   BookOpen, 
@@ -65,7 +66,8 @@ export default async function DashboardPage(props: { searchParams: Promise<{ err
 
   // Graceful creation if trigger has slightly delayed database synchronization
   if (!profile) {
-    const { data: newProfile } = await supabase
+    const admin = createAdminClient();
+    const { data: newProfile } = await admin
       .from('profiles')
       .insert({
         id: user.id,
