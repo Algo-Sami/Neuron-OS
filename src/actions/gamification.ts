@@ -94,8 +94,12 @@ export async function completeQuickQuiz(score: number, totalQuestions: number) {
   // Award XP
   const result = await awardXP(user.id, "complete_quiz", { score, totalQuestions });
 
-  // Phase 3: increment weekly competition score (quiz_completed)
-  await incrementWeeklyScore(user.id, "quiz_completed");
+  // NOTE: incrementWeeklyScore is intentionally NOT called here.
+  // completeQuickQuiz accepts score/totalQuestions from the client with no server-side answer
+  // verification, so calling incrementWeeklyScore here creates an unlimited farming vector.
+  // Weekly competition points are only credited from the verified paths:
+  //   - submitQuizAction (grades against stored answers server-side)
+  //   - submitRoomQuizAnswersAction (room quiz, server-recorded)
 
   revalidatePath("/leaderboard");
   revalidatePath("/dashboard");

@@ -321,7 +321,7 @@ export async function sendRoomMessageAction(roomId: string, text: string) {
         user_id: userId,
         message: text,
       })
-      .select("*, profiles(first_name, last_name)")
+      .select("*, public_profiles(first_name, last_name)")
       .single();
 
     if (error) throw error;
@@ -386,13 +386,13 @@ async function executeRoomSlashCommand(roomId: string, text: string, senderId: s
     if (command === "/summarize") {
       const { data: chatHistory } = await supabase
         .from("room_messages")
-        .select("message, user_id, profiles(first_name)")
+        .select("message, user_id, public_profiles(first_name)")
         .eq("room_id", roomId)
         .order("created_at", { ascending: true })
         .limit(20);
 
       const transcript = chatHistory?.map(c => {
-        const profile = c.profiles as unknown as { first_name?: string } | { first_name?: string }[] | null;
+        const profile = c.public_profiles as unknown as { first_name?: string } | { first_name?: string }[] | null;
         const name = Array.isArray(profile) ? profile[0]?.first_name : profile?.first_name;
         return `${name || "Member"}: ${c.message}`;
       }).join("\n") || "";
@@ -637,7 +637,7 @@ export async function getRoomQuizScoreboardAction(roomQuizId: string) {
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("room_quiz_attempts")
-      .select("*, profiles(first_name, last_name, avatar_url)")
+      .select("*, public_profiles(first_name, last_name, avatar_url)")
       .eq("room_quiz_id", roomQuizId)
       .order("score", { ascending: false });
 
