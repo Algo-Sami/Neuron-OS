@@ -13,7 +13,14 @@
 -- ==============================================================================
 
 -- ── 1. Column-Level Permission Whitelist on public.profiles ───────────────────
-
+-- CRITICAL DEVELOPER NOTICE:
+-- Table-level write privileges are revoked. The grant below operates as an explicit
+-- strict whitelist. ANY new student-editable column added to `public.profiles` in
+-- future schema migrations MUST be explicitly added via `GRANT UPDATE (<col>) ON
+-- public.profiles TO authenticated;`. Omitting a column from this whitelist will cause
+-- student profile saves that touch that column to fail with PostgreSQL error 42501
+-- ("permission denied for table profiles").
+--
 -- Revoke all table-level write operations
 REVOKE INSERT, UPDATE, DELETE ON public.profiles FROM authenticated, anon;
 
