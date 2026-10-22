@@ -18,7 +18,7 @@ export default async function UploadsPage() {
   // 1. Fetch user-uploaded documents (including soft-deleted/recycled ones so history persists)
   const { data: userUploadedDocs } = await supabase
     .from('documents')
-    .select('*, uploads(file_size), ai_summaries(id)')
+    .select('*, uploads(file_size, folder_name), ai_summaries(id), folders(name)')
     .eq('user_id', user?.id)
     .not('upload_id', 'is', null)
     .or('ai_doc_type.is.null,ai_doc_type.neq.ai_generated')
@@ -139,8 +139,11 @@ export default async function UploadsPage() {
       const isSubjectRecycled = Boolean(subject?.deleted_at);
       const isSubjectMissing = Boolean(d.subject_id && !subject);
       const isDeleted = Boolean(d.deleted_at || isSubjectRecycled || isSubjectMissing);
+      const resolvedFolder = d.folders?.name || d.uploads?.folder_name || d.ai_topic || null;
       return {
         ...d,
+        ai_topic: resolvedFolder,
+        folder_name: resolvedFolder,
         summary_status: hasAiSummary ? 'completed' : d.summary_status,
         file_deleted: isDeleted,
         file_url: isDeleted ? null : d.file_url,

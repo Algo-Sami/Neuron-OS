@@ -108,8 +108,10 @@ export interface DocumentRow {
   ai_topic: string | null;
   subject_id: string | null;
   folder_id?: string | null;
+  folder_name?: string | null;
+  folders?: { name: string } | null;
   size?: number | null;
-  uploads?: { file_size: number | null } | null;
+  uploads?: { file_size: number | null; folder_name?: string | null } | null;
   file_deleted?: boolean;
   ai_cooldown_until?: string | null;
   ai_error_category?: string | null;
@@ -506,7 +508,7 @@ function UploadArea({
 
         const subject = subjects.find((s) => s.id === matchedDoc.subject_id);
         const resolvedSubjectName = matchedDoc.ai_subject || subject?.name || item.destinationSubject || null;
-        const resolvedFolderName = matchedDoc.ai_topic || item.destinationFolder || "Lectures";
+        const resolvedFolderName = matchedDoc.folders?.name || matchedDoc.folder_name || matchedDoc.ai_topic || item.destinationFolder || "Lectures";
         const isConfirmed = Boolean(
           matchedDoc.subject_id &&
           matchedDoc.classification_status !== "pending"
@@ -1474,7 +1476,9 @@ function FileDetailPanel({
           </div>
           <div className="min-w-0">
             <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Folder</p>
-            <p className="text-[11px] font-medium text-foreground mt-0.5 truncate">{doc.ai_topic || "Lectures"}</p>
+            <p className="text-[11px] font-medium text-foreground mt-0.5 truncate">
+              {doc.folders?.name || doc.folder_name || doc.ai_topic || "Lectures"}
+            </p>
           </div>
         </div>
 
@@ -1687,7 +1691,7 @@ function UploadHistorySection({
       if (search) {
         const q = search.toLowerCase();
         const subName = (d.subject_id ? subjectMap.get(d.subject_id) : null) || d.ai_subject || "";
-        const topicName = d.ai_topic || "";
+        const topicName = d.folders?.name || d.folder_name || d.ai_topic || "";
         if (
           !d.title.toLowerCase().includes(q) &&
           !subName.toLowerCase().includes(q) &&
@@ -2107,8 +2111,8 @@ function UploadHistorySection({
                     const isSelected = detailDocId === doc.id;
                     const rawExt = (doc.file_type || "").toLowerCase();
 
-                    // Only show AI study tools for lecture files
-                    const isLectureFile = /lecture/i.test(doc.ai_topic || "");
+                    // Show AI study tools for lecture files or files titled lecture
+                    const isLectureFile = /lecture/i.test(doc.folders?.name || doc.folder_name || doc.ai_topic || "") || /lecture/i.test(doc.title || "");
 
                     return (
                       <tr
@@ -2381,7 +2385,7 @@ function UploadHistorySection({
                   : doc.ai_subject;
                 const isDeleting = deletingId === doc.id;
                 const isSelected = detailDocId === doc.id;
-                const isLectureFile = /lecture/i.test(doc.ai_topic || "");
+                const isLectureFile = /lecture/i.test(doc.folders?.name || doc.folder_name || doc.ai_topic || "") || /lecture/i.test(doc.title || "");
 
                 return (
                   <div

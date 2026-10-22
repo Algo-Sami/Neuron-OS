@@ -435,13 +435,32 @@ export async function moveDocumentAction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
+  let subjectName: string | null = null;
+  let folderName: string | null = null;
+  if (targetSubjectId) {
+    const { data: sub } = await supabase.from("subjects").select("name").eq("id", targetSubjectId).maybeSingle();
+    subjectName = sub?.name || null;
+  }
+  if (targetFolderId) {
+    const { data: fold } = await supabase.from("folders").select("name").eq("id", targetFolderId).maybeSingle();
+    folderName = fold?.name || null;
+  }
+
+  const documentUpdates: Record<string, any> = {
+    subject_id: targetSubjectId,
+    folder_id: targetFolderId,
+    updated_at: new Date().toISOString()
+  };
+  if (targetFolderId) {
+    documentUpdates.ai_topic = folderName;
+  }
+  if (targetSubjectId) {
+    documentUpdates.ai_subject = subjectName;
+  }
+
   const { error } = await supabase
     .from("documents")
-    .update({
-      subject_id: targetSubjectId,
-      folder_id: targetFolderId,
-      updated_at: new Date().toISOString()
-    })
+    .update(documentUpdates)
     .eq("id", documentId)
     .eq("user_id", user.id);
 
@@ -457,17 +476,6 @@ export async function moveDocumentAction(
       .maybeSingle();
 
     if (doc?.upload_id) {
-      let subjectName: string | null = null;
-      let folderName: string | null = null;
-      if (targetSubjectId) {
-        const { data: sub } = await supabase.from("subjects").select("name").eq("id", targetSubjectId).maybeSingle();
-        subjectName = sub?.name || null;
-      }
-      if (targetFolderId) {
-        const { data: fold } = await supabase.from("folders").select("name").eq("id", targetFolderId).maybeSingle();
-        folderName = fold?.name || null;
-      }
-
       await supabase
         .from("uploads")
         .update({

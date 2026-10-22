@@ -1190,6 +1190,8 @@ export async function confirmAIClassification(documentId: string) {
     .update({
       subject_id: subjectId,
       folder_id: folderId,
+      ai_subject: suggestedSubject,
+      ai_topic: suggestedTopic,
       classification_status: 'confirmed',
       updated_at: new Date().toISOString()
     })
