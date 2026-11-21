@@ -20,13 +20,13 @@ export function FloatingWhatsApp() {
         }`}
       >
         <div
-          className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/95 backdrop-blur-md border border-slate-200/80 shadow-lg whitespace-nowrap"
+          className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-[#0b0f19]/95 backdrop-blur-md border border-cyan-500/30 shadow-[0_0_20px_rgba(0,0,0,0.5)] whitespace-nowrap"
         >
-          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-semibold text-slate-800">Chat with Neuron Support</span>
+          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+          <span className="text-xs font-semibold text-slate-200">Chat with Neuron Support</span>
           <button
             onClick={(e) => { e.stopPropagation(); setDismissed(true); }}
-            className="ml-1 text-slate-400 hover:text-slate-600 transition-colors"
+            className="ml-1 text-slate-400 hover:text-white transition-colors"
             aria-label="Dismiss"
           >
             <X className="h-3.5 w-3.5" />
@@ -48,7 +48,7 @@ export function FloatingWhatsApp() {
         <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-20" />
         <span className="absolute inset-[-6px] rounded-full border border-emerald-500/30 animate-pulse" />
 
-        {/* WhatsApp icon — inline SVG for accuracy */}
+        {/* WhatsApp icon */}
         <svg
           className="h-7 w-7 text-white fill-current"
           viewBox="0 0 24 24"

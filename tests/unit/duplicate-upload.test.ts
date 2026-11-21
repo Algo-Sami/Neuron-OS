@@ -5,6 +5,7 @@ import {
   generateCopyFilename,
   findNextAvailableCopyName,
   checkDuplicateUpload,
+  extractBaseFileName,
 } from '../../src/services/storage/duplicate-detection';
 
 describe('Neuron OS — Duplicate Upload & Copy Naming Test Suite', () => {
@@ -204,7 +205,6 @@ describe('Neuron OS — Duplicate Upload & Copy Naming Test Suite', () => {
 
   // ── Test 13: Extract Base Filename Helper ─────────────────────────────────
   test('Test 13: extractBaseFileName strips copy suffixes cleanly while preserving extension', () => {
-    const { extractBaseFileName } = require('../../src/services/storage/duplicate-detection');
     assert.strictEqual(
       extractBaseFileName('Payment Receipt - KHADIJA BIBI (1).pdf'),
       'Payment Receipt - KHADIJA BIBI.pdf'

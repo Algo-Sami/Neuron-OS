@@ -15,7 +15,7 @@ describe('Daily Check-In State Consistency Suite', () => {
     const checkInXP = 25;
 
     // Simulation of guarded atomic update: update only if last_check_in_date != todayStr
-    let alreadyCheckedIn = progress.last_check_in_date === todayStr;
+    const alreadyCheckedIn = progress.last_check_in_date === todayStr;
     assert.strictEqual(alreadyCheckedIn, false);
 
     // Apply update
@@ -54,7 +54,7 @@ describe('Daily Check-In State Consistency Suite', () => {
 
   it('Test 3: Concurrent check-in simulation guards against double awarding', () => {
     // Shared database state
-    let dbRecord = {
+    const dbRecord = {
       user_id: 'user_1',
       total_xp: 100,
       monthly_xp: 50,

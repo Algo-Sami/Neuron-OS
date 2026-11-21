@@ -5,6 +5,8 @@ import { UserPreferences } from '@/lib/preferences';
 import { logger } from '@/lib/logger';
 import { dispatchStudyPackGeneration } from '@/services/ai/pipeline/study-pack-dispatcher';
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   try {

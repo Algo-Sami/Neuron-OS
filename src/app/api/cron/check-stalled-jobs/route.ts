@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { logger } from '@/lib/logger';
 
+export const maxDuration = 60;
+
 /**
  * Cron Handler — Stalled Job Alert Check.
  *
@@ -160,6 +162,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       checkedAt,
+      workerPingStatus,
       stalledQueued: stalledQueued.length,
       stalledProcessing: stalledProcessing.length,
       totalStalled,

@@ -13,7 +13,7 @@ import { FloatingWhatsApp } from "./floating-whatsapp";
 
 export function LandingPage() {
   return (
-    <div className="min-h-screen bg-[#fafbfc] text-slate-900 overflow-x-hidden selection:bg-blue-100 selection:text-blue-800">
+    <div className="min-h-screen bg-[#07090e] text-slate-100 overflow-x-hidden selection:bg-cyan-500/25 selection:text-cyan-200">
       <LandingNavbar />
       <HeroSection />
       <StatsSection />

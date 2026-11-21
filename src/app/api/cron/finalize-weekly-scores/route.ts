@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { 
-  getISOWeekStartDate,
   finalizeWeeklyScoresAndApplyBoosts 
 } from '@/services/gamification/weekly-scores';
+
+export const maxDuration = 60;
 
 /**
  * Scheduled Cron Handler for Weekly Scores & Winner Boost Assignment.

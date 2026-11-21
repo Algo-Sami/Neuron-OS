@@ -92,7 +92,7 @@ function TestimonialCard({
   return (
     <div
       ref={cardRef}
-      className="p-6 sm:p-7 rounded-2xl sm:rounded-3xl bg-white border border-slate-200/80 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group shadow-xs"
+      className="p-6 sm:p-7 rounded-2xl sm:rounded-3xl bg-[#0b0f19]/80 border border-white/[0.08] hover:border-cyan-500/40 hover:bg-[#0d1424]/90 hover:shadow-[0_0_30px_rgba(56,189,248,0.1)] hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group shadow-xs"
       style={{
         transition: `opacity 0.5s ease ${index * 0.08}s, transform 0.5s ease ${index * 0.08}s, box-shadow 0.25s, border-color 0.25s`,
       }}
@@ -101,24 +101,24 @@ function TestimonialCard({
         {/* Stars */}
         <div className="flex gap-1 text-amber-400 text-sm">
           {Array.from({ length: rating }).map((_, i) => (
-            <span key={i}>★</span>
+            <span key={i} className="drop-shadow-[0_0_4px_rgba(251,191,36,0.5)]">★</span>
           ))}
         </div>
 
         {/* Review */}
-        <blockquote className="text-xs sm:text-[13.5px] text-slate-600 leading-relaxed flex-1 mt-3.5 mb-4">
+        <blockquote className="text-xs sm:text-[13.5px] text-slate-300 leading-relaxed flex-1 mt-3.5 mb-4">
           &ldquo;{review}&rdquo;
         </blockquote>
       </div>
 
       {/* Author */}
-      <div className="flex items-center gap-3 pt-3.5 border-t border-slate-100">
-        <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 shadow-xs ring-2 ring-blue-50">
+      <div className="flex items-center gap-3 pt-3.5 border-t border-white/[0.06]">
+        <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 shadow-[0_0_12px_rgba(56,189,248,0.3)] ring-2 ring-cyan-500/20">
           {initials}
         </div>
         <div>
-          <div className="text-sm font-bold text-slate-800">{name}</div>
-          <div className="text-xs text-slate-500">{role} · {university}</div>
+          <div className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors">{name}</div>
+          <div className="text-xs text-slate-400">{role} · {university}</div>
         </div>
       </div>
     </div>
@@ -149,7 +149,7 @@ export function TestimonialsSection() {
 
   return (
     <section
-      className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
+      className="relative py-20 lg:py-28 bg-[#07090e] border-b border-white/[0.08]"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
@@ -158,15 +158,15 @@ export function TestimonialsSection() {
           className="text-center mb-14 sm:mb-16 space-y-3.5"
           style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
-          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-blue-50/80 border border-blue-200/60 shadow-xs">
-            <span className="text-xs font-semibold uppercase tracking-wider text-blue-600">
+          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-cyan-300">
               Student Reviews
             </span>
           </div>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight">
-            Loved by <span className="text-blue-600">Students</span>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight">
+            Loved by <span className="bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-300 bg-clip-text text-transparent">Students</span>
           </h2>
-          <p className="text-sm sm:text-base text-slate-600 max-w-xl mx-auto">
+          <p className="text-sm sm:text-base text-slate-400 max-w-xl mx-auto">
             Real feedback from students who transformed their academic workflows with Neuron OS.
           </p>
         </div>
@@ -180,15 +180,15 @@ export function TestimonialsSection() {
 
         {/* Bottom trust bar */}
         <div className="mt-12 flex justify-center">
-          <div className="inline-flex flex-wrap items-center justify-center gap-5 sm:gap-8 text-xs text-slate-600 bg-slate-50/80 border border-slate-200/80 px-6 py-3 rounded-full shadow-xs">
+          <div className="inline-flex flex-wrap items-center justify-center gap-5 sm:gap-8 text-xs text-slate-300 bg-[#0b0f19]/90 border border-white/[0.08] px-6 py-3 rounded-full shadow-lg backdrop-blur-md">
             <div className="flex items-center gap-1.5">
-              <span className="flex gap-0.5 text-amber-500 font-bold">★★★★★</span>
-              <span className="font-bold text-slate-800">4.9/5 average rating</span>
+              <span className="flex gap-0.5 text-amber-400 font-bold">★★★★★</span>
+              <span className="font-bold text-white">4.9/5 average rating</span>
             </div>
-            <div className="h-3.5 w-px bg-slate-300 hidden sm:block" />
-            <div className="font-medium text-slate-700">1,200+ active students</div>
-            <div className="h-3.5 w-px bg-slate-300 hidden sm:block" />
-            <div className="font-medium text-slate-700">10+ universities represented</div>
+            <div className="h-3.5 w-px bg-white/10 hidden sm:block" />
+            <div className="font-medium text-slate-300">1,200+ active students</div>
+            <div className="h-3.5 w-px bg-white/10 hidden sm:block" />
+            <div className="font-medium text-slate-300">10+ universities represented</div>
           </div>
         </div>
       </div>

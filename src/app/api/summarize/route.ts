@@ -19,6 +19,8 @@ import { createClient } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import { SummarySkillService, SummaryMode } from '@/services/ai/pipeline/summary-skill-service';
 
+export const maxDuration = 60;
+
 const VALID_MODES: SummaryMode[] = [
   'beginner',
   'concise',

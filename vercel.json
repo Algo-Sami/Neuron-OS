@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/check-stalled-jobs",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/finalize-weekly-scores",
+      "schedule": "55 23 * * 0"
+    }
+  ]
+}
