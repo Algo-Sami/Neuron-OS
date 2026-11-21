@@ -10,14 +10,11 @@ function subscribe() {
 
 function WebGLFallback() {
   return (
-    <div className="w-full h-full flex items-center justify-center pointer-events-none relative">
-      <div className="relative w-44 h-44 sm:w-56 sm:h-56 flex items-center justify-center">
+    <div className="absolute inset-0 w-full h-full flex items-center justify-center pointer-events-none">
+      <div className="relative w-72 h-72 sm:w-96 sm:h-96 flex items-center justify-center">
         {/* Soft pastel ambient halo */}
-        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-cyan-200/50 via-sky-300/40 to-indigo-200/40 blur-2xl opacity-70 animate-pulse" />
-        <div className="absolute inset-2 rounded-full border border-sky-300/60 animate-ping opacity-25" />
-        <div className="relative z-10 w-24 h-24 rounded-full border border-sky-400/50 bg-white/80 backdrop-blur-md flex items-center justify-center shadow-[0_10px_30px_rgba(14,165,233,0.18)]">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-600 animate-spin" style={{ animationDuration: "8s" }} />
-        </div>
+        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-cyan-200/40 via-sky-300/30 to-indigo-200/30 blur-3xl opacity-60 animate-pulse" />
+        <div className="absolute inset-6 rounded-full border border-sky-300/40 animate-ping opacity-20" />
       </div>
     </div>
   );
@@ -46,33 +43,29 @@ export function HeroCanvas() {
     return () => window.removeEventListener("resize", checkSize);
   }, []);
 
-  if (!mounted) {
-    return <WebGLFallback />;
-  }
-
-  if (!hasWebGL) {
+  if (!mounted || !hasWebGL) {
     return <WebGLFallback />;
   }
 
   return (
-    <div className="relative w-full h-full min-h-[300px] sm:min-h-[380px] lg:min-h-[440px] flex items-center justify-center">
+    <div className="absolute inset-0 w-full h-full pointer-events-none">
       <Canvas
-        camera={{ position: [0, 0, 5.8], fov: isMobile ? 52 : 46 }}
-        dpr={[1, typeof window !== "undefined" ? Math.min(window.devicePixelRatio, 2) : 1]}
+        camera={{ position: [0, 0, 7.2], fov: isMobile ? 54 : 44 }}
+        dpr={[1, typeof window !== "undefined" ? Math.min(window.devicePixelRatio, 1.5) : 1]}
         gl={{
           antialias: true,
           alpha: true,
           powerPreference: "high-performance",
         }}
-        className="pointer-events-auto"
+        className="w-full h-full pointer-events-none"
       >
         <Suspense fallback={null}>
           {/* Pristine Light Scene Lighting Rig */}
-          <ambientLight intensity={1.4} />
-          <directionalLight position={[5, 8, 4]} intensity={2.2} color="#f0f9ff" />
-          <directionalLight position={[-5, -3, -3]} intensity={1.2} color="#e0e7ff" />
-          <pointLight position={[0, 0, 0]} intensity={2.5} color="#0ea5e9" distance={6} />
-          <pointLight position={[3, 3, 2]} intensity={1.5} color="#38bdf8" />
+          <ambientLight intensity={1.5} />
+          <directionalLight position={[6, 9, 5]} intensity={2.4} color="#f0f9ff" />
+          <directionalLight position={[-6, -4, -3]} intensity={1.3} color="#e0e7ff" />
+          <pointLight position={[0, 0.45, 0]} intensity={3} color="#0ea5e9" distance={9} />
+          <pointLight position={[4, 4, 3]} intensity={1.6} color="#38bdf8" />
 
           <NeuralCoreScene isMobile={isMobile} />
         </Suspense>

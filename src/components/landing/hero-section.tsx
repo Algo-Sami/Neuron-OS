@@ -8,8 +8,11 @@ export function HeroSection() {
   return (
     <section
       id="home"
-      className="relative min-h-[92vh] flex flex-col justify-center overflow-hidden bg-white pt-36 sm:pt-40 pb-20"
+      className="relative min-h-[92vh] flex flex-col justify-center overflow-hidden bg-white pt-28 sm:pt-36 pb-20"
     >
+      {/* Full Hero 3D Spatial Canvas Layer */}
+      <HeroCanvas />
+
       {/* Wasmer-inspired ethereal cyan & sky blue ambient gradient */}
       <div
         className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[600px] pointer-events-none opacity-80"
@@ -36,13 +39,8 @@ export function HeroSection() {
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         {/* Main Hero Header (Centered & Wasmer-inspired) */}
         <div className="flex flex-col items-center text-center max-w-4xl mx-auto space-y-6">
-          {/* 3D Knowledge Core Orb directly above title */}
-          <div className="w-48 h-48 sm:w-56 sm:h-56 -mb-6 relative flex items-center justify-center">
-            <HeroCanvas />
-          </div>
-
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-slate-200/80 shadow-[0_2px_10px_rgba(0,0,0,0.03)] backdrop-blur-md">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/90 border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] backdrop-blur-md">
             <span className="h-2 w-2 rounded-full bg-cyan-500 animate-pulse" />
             <span className="text-xs font-semibold text-slate-800">
               The AI Academic Operating System

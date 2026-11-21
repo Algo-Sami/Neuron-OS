@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Sparkles, Menu, X, ArrowRight } from "lucide-react";
+import { Sparkles, Menu, X } from "lucide-react";
 
 export function LandingNavbar() {
   const [scrolled, setScrolled] = useState(false);
@@ -27,19 +27,8 @@ export function LandingNavbar() {
 
   return (
     <>
-      {/* Top Announcement Bar (Wasmer inspired) */}
-      <div className="bg-slate-900 text-white text-[11px] sm:text-xs py-2 px-4 text-center font-medium relative z-50 flex items-center justify-center gap-2">
-        <span className="px-2 py-0.5 rounded-full bg-cyan-400/20 text-cyan-300 font-bold text-[10px] uppercase tracking-wider">
-          New
-        </span>
-        <span>Neuron OS 2.0 with Realtime Vector Retrieval is now live for all students</span>
-        <Link href="/login" className="hidden sm:inline-flex items-center gap-1 text-cyan-300 hover:text-white underline font-semibold ml-1">
-          Explore Free <ArrowRight className="h-3 w-3" />
-        </Link>
-      </div>
-
       {/* Floating Pill Navbar */}
-      <header className="fixed top-9 left-0 right-0 z-40 px-4 sm:px-6 lg:px-8 transition-all duration-300">
+      <header className="fixed top-4 sm:top-5 left-0 right-0 z-40 px-4 sm:px-6 lg:px-8 transition-all duration-300">
         <div className="max-w-6xl mx-auto">
           <nav
             className={`flex items-center justify-between rounded-full px-5 sm:px-6 py-2.5 transition-all duration-300 ${
