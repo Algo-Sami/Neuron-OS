@@ -47,6 +47,7 @@ lint_full_report.txt
 lint_results.txt
 lint_results_full.json
 lint_results_utf8.txt
+.playwright-mcp/
 
 # supabase temporary files
 supabase/.temp/

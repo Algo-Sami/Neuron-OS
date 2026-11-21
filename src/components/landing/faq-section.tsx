@@ -43,30 +43,9 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const itemRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const el = itemRef.current;
-    if (!el) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateY(12px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <div
-      ref={itemRef}
       className="border border-slate-200/80 rounded-2xl bg-white overflow-hidden shadow-xs hover:border-slate-300 hover:shadow-md transition-all duration-200"
-      style={{ transition: `opacity 0.4s ease ${index * 0.05}s, transform 0.4s ease ${index * 0.05}s, border-color 0.2s` }}
     >
       <button
         onClick={() => setOpen(!open)}
@@ -93,27 +72,6 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
 }
 
 export function FAQSection() {
-  const titleRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = titleRef.current;
-    if (!el) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateY(16px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <section
       id="faqs"
@@ -122,9 +80,7 @@ export function FAQSection() {
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div
-          ref={titleRef}
           className="text-center mb-12 sm:mb-14 space-y-3.5"
-          style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
           <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white border border-slate-200 text-slate-800 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">FAQ</span>

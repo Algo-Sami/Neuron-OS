@@ -68,34 +68,9 @@ function TestimonialCard({
   review,
   index,
 }: (typeof TESTIMONIALS)[number] & { index: number }) {
-  const cardRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const card = cardRef.current;
-    if (!card) return;
-    card.style.opacity = "0";
-    card.style.transform = "translateY(20px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          card.style.opacity = "1";
-          card.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(card);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <div
-      ref={cardRef}
       className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 hover:border-slate-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group shadow-xs"
-      style={{
-        transition: `opacity 0.5s ease ${index * 0.08}s, transform 0.5s ease ${index * 0.08}s, box-shadow 0.25s, border-color 0.25s`,
-      }}
     >
       <div>
         {/* Stars */}
@@ -126,27 +101,6 @@ function TestimonialCard({
 }
 
 export function TestimonialsSection() {
-  const titleRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = titleRef.current;
-    if (!el) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateY(16px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <section
       className="relative py-20 lg:py-28 bg-[#f8fafc] border-b border-slate-200/70"
@@ -154,9 +108,7 @@ export function TestimonialsSection() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div
-          ref={titleRef}
           className="text-center mb-14 sm:mb-16 space-y-3.5"
-          style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
           <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white border border-slate-200 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">

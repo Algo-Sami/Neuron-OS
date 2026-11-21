@@ -188,25 +188,6 @@ export function AIShowcaseSection() {
   }, []);
 
   useEffect(() => {
-    const el = sectionRef.current;
-    if (!el) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateY(20px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
     if (previewRef.current) {
       previewRef.current.style.opacity = "0";
       previewRef.current.style.transform = "scale(0.99)";
@@ -229,9 +210,7 @@ export function AIShowcaseSection() {
       className="relative py-20 lg:py-28 bg-[#f8fafc] border-b border-slate-200/70"
     >
       <div
-        ref={sectionRef}
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-        style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
       >
         {/* Header */}
         <div className="text-center mb-14 sm:mb-16 space-y-3.5">

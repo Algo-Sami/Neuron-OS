@@ -10,7 +10,7 @@ const STATS = [
 ];
 
 function useCountUp(target: number, duration: number = 1800, start: boolean = false) {
-  const [count, setCount] = useState(0);
+  const [count, setCount] = useState(target);
 
   useEffect(() => {
     if (!start) return;
@@ -24,9 +24,12 @@ function useCountUp(target: number, duration: number = 1800, start: boolean = fa
       setCount(Math.floor(ease * target));
       if (progress < 1) {
         animId = requestAnimationFrame(animate);
+      } else {
+        setCount(target);
       }
     };
 
+    setCount(0);
     animId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animId);
   }, [target, duration, start]);
@@ -55,7 +58,7 @@ function StatCard({
           observer.disconnect();
         }
       },
-      { threshold: 0.15 }
+      { threshold: 0 }
     );
     observer.observe(el);
     return () => observer.disconnect();

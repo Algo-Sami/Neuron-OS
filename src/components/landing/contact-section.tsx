@@ -67,25 +67,6 @@ export function ContactSection() {
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    const el = sectionRef.current;
-    if (!el) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateY(20px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.05 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
   const validate = () => {
     const e: Record<string, string> = {};
     if (!formState.name.trim()) e.name = "Name is required";
@@ -124,9 +105,7 @@ export function ContactSection() {
       className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
     >
       <div
-        ref={sectionRef}
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-        style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
       >
         {/* Header */}
         <div className="text-center mb-14 sm:mb-16 space-y-3.5">

@@ -50,36 +50,13 @@ const VALUES = [
 ];
 
 export function AboutSection() {
-  const sectionRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = sectionRef.current;
-    if (!el) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateY(24px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.08 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <section
       id="about"
       className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
     >
       <div
-        ref={sectionRef}
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-        style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           {/* Left: Problem → Solution */}

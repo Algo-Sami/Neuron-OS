@@ -61,27 +61,6 @@ const PLANS = [
 ];
 
 export function PricingSection() {
-  const titleRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = titleRef.current;
-    if (!el) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateY(20px)";
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <section
       id="pricing"
@@ -90,9 +69,7 @@ export function PricingSection() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div
-          ref={titleRef}
           className="text-center mb-14 sm:mb-16 space-y-3.5"
-          style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
           <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-800 shadow-xs">
             <Zap className="h-3.5 w-3.5 text-cyan-600" />
