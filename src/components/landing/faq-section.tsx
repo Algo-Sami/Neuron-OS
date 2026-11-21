@@ -65,18 +65,18 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
   return (
     <div
       ref={itemRef}
-      className="border border-white/[0.08] rounded-2xl bg-[#0b0f19]/80 overflow-hidden shadow-xs hover:border-cyan-500/40 hover:bg-[#0d1424]/90 transition-all duration-200"
+      className="border border-slate-200/80 rounded-2xl bg-white overflow-hidden shadow-xs hover:border-slate-300 hover:shadow-md transition-all duration-200"
       style={{ transition: `opacity 0.4s ease ${index * 0.05}s, transform 0.4s ease ${index * 0.05}s, border-color 0.2s` }}
     >
       <button
         onClick={() => setOpen(!open)}
         type="button"
-        className="w-full flex items-center justify-between gap-4 px-6 py-4 text-left hover:bg-white/[0.02] transition-colors"
+        className="w-full flex items-center justify-between gap-4 px-6 py-4.5 text-left hover:bg-slate-50/70 transition-colors"
         aria-expanded={open}
       >
-        <span className="text-sm sm:text-base font-bold text-white">{q}</span>
+        <span className="text-sm sm:text-base font-bold text-slate-900">{q}</span>
         <ChevronDown
-          className={`h-5 w-5 text-cyan-400 flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          className={`h-5 w-5 text-slate-500 flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180 text-cyan-600" : ""}`}
         />
       </button>
       <div
@@ -84,7 +84,7 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
         className="overflow-hidden transition-all duration-200 ease-in-out"
         style={{ maxHeight: open ? "500px" : "0px", opacity: open ? 1 : 0 }}
       >
-        <div className="px-6 pb-5 pt-3 text-xs sm:text-sm text-slate-300 leading-relaxed border-t border-white/[0.06] bg-black/20">
+        <div className="px-6 pb-5 pt-3 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-slate-100 bg-slate-50/40">
           {a}
         </div>
       </div>
@@ -117,7 +117,7 @@ export function FAQSection() {
   return (
     <section
       id="faqs"
-      className="relative py-20 lg:py-28 bg-[#07090e] border-b border-white/[0.08]"
+      className="relative py-20 lg:py-28 bg-[#f8fafc] border-b border-slate-200/70"
     >
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
@@ -126,13 +126,13 @@ export function FAQSection() {
           className="text-center mb-12 sm:mb-14 space-y-3.5"
           style={{ transition: "opacity 0.6s ease, transform 0.6s ease" }}
         >
-          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 shadow-xs">
-            <span className="text-xs font-semibold uppercase tracking-wider text-cyan-300">FAQ</span>
+          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white border border-slate-200 text-slate-800 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">FAQ</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight">
-            Common <span className="bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-300 bg-clip-text text-transparent">Questions</span>
+          <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+            Common <span className="text-cyan-600">Questions</span>
           </h2>
-          <p className="text-sm sm:text-base text-slate-400">
+          <p className="text-sm sm:text-base text-slate-600">
             Everything you need to know about Neuron OS.
           </p>
         </div>

@@ -1,195 +1,161 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { Menu, X, Sparkles } from "lucide-react";
-
-const NAV_LINKS = [
-  { label: "Home", href: "#home", type: "hash" },
-  { label: "Features", href: "#features", type: "hash" },
-  { label: "AI Assistant", href: "#ai-showcase", type: "hash" },
-  { label: "About", href: "#about", type: "hash" },
-  { label: "Pricing", href: "#pricing", type: "hash" },
-  { label: "FAQs", href: "#faqs", type: "hash" },
-  { label: "Contact", href: "#contact", type: "hash" },
-];
+import { Sparkles, Menu, X, ArrowRight } from "lucide-react";
 
 export function LandingNavbar() {
   const [scrolled, setScrolled] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const pathname = usePathname();
-  const router = useRouter();
-  const isLanding = pathname === "/";
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const handler = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", handler, { passive: true });
-    return () => window.removeEventListener("scroll", handler);
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 20);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const handleNavClick = (
-    e: React.MouseEvent<HTMLAnchorElement>,
-    link: (typeof NAV_LINKS)[number]
-  ) => {
-    if (link.type === "route") {
-      setMobileOpen(false);
-      return;
+  const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (href.startsWith("#") && href.length > 1) {
+      e.preventDefault();
+      const el = document.querySelector(href);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      setMobileMenuOpen(false);
     }
-    e.preventDefault();
-    setMobileOpen(false);
-    if (!isLanding) {
-      router.push("/" + link.href);
-      return;
-    }
-    const el = document.querySelector(link.href);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
     <>
-      <nav
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          scrolled
-            ? "bg-[#07090e]/85 backdrop-blur-xl border-b border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.5)]"
-            : "bg-[#07090e]/45 backdrop-blur-md border-b border-white/[0.05]"
-        }`}
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 sm:h-18">
+      {/* Top Announcement Bar (Wasmer inspired) */}
+      <div className="bg-slate-900 text-white text-[11px] sm:text-xs py-2 px-4 text-center font-medium relative z-50 flex items-center justify-center gap-2">
+        <span className="px-2 py-0.5 rounded-full bg-cyan-400/20 text-cyan-300 font-bold text-[10px] uppercase tracking-wider">
+          New
+        </span>
+        <span>Neuron OS 2.0 with Realtime Vector Retrieval is now live for all students</span>
+        <Link href="/login" className="hidden sm:inline-flex items-center gap-1 text-cyan-300 hover:text-white underline font-semibold ml-1">
+          Explore Free <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+
+      {/* Floating Pill Navbar */}
+      <header className="fixed top-9 left-0 right-0 z-40 px-4 sm:px-6 lg:px-8 transition-all duration-300">
+        <div className="max-w-6xl mx-auto">
+          <nav
+            className={`flex items-center justify-between rounded-full px-5 sm:px-6 py-2.5 transition-all duration-300 ${
+              scrolled
+                ? "bg-white/95 backdrop-blur-xl border border-slate-200/90 shadow-[0_10px_30px_-10px_rgba(15,23,42,0.1)]"
+                : "bg-white/80 backdrop-blur-md border border-slate-200/70 shadow-[0_4px_20px_-4px_rgba(15,23,42,0.05)]"
+            }`}
+          >
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2.5 group flex-shrink-0">
-              <div className="relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-600 text-white font-bold text-sm shadow-[0_0_20px_rgba(56,189,248,0.35)] group-hover:scale-105 transition-transform duration-200">
-                <span className="relative z-10 font-mono tracking-tight font-black">N</span>
-                <span className="absolute inset-0 rounded-xl bg-cyan-400 opacity-0 group-hover:opacity-30 blur-sm transition-opacity" />
+              <div className="relative flex h-8 w-8 sm:h-8.5 sm:w-8.5 items-center justify-center rounded-xl bg-slate-900 text-white font-bold text-sm shadow-sm group-hover:scale-105 transition-transform duration-200">
+                <span className="relative z-10 font-mono tracking-tight font-black text-cyan-400">N</span>
               </div>
               <div className="flex flex-col leading-none">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm sm:text-base font-extrabold tracking-tight text-white group-hover:text-cyan-400 transition-colors">
-                    NEURON OS
-                  </span>
-                  <span className="hidden sm:inline-block h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                </div>
-                <span className="text-[9.5px] font-semibold uppercase tracking-widest text-cyan-400/90 leading-none mt-0.5">
+                <span className="text-sm sm:text-base font-extrabold tracking-tight text-slate-900 group-hover:text-cyan-600 transition-colors">
+                  NEURON OS
+                </span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500 leading-none mt-0.5">
                   Academic AI
                 </span>
               </div>
             </Link>
 
-            {/* Desktop Nav Links */}
-            <div className="hidden md:flex items-center gap-1 bg-white/[0.03] p-1.5 rounded-full border border-white/[0.08] backdrop-blur-lg">
-              {NAV_LINKS.map((link) => {
-                const isActive = link.type === "route" && pathname === link.href;
-                if (link.type === "route") {
-                  return (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      className={`relative px-4 py-1.5 text-xs font-medium rounded-full transition-all duration-200 ${
-                        isActive
-                          ? "text-cyan-300 bg-white/10 shadow-xs font-semibold"
-                          : "text-slate-300 hover:text-white hover:bg-white/[0.07]"
-                      }`}
-                    >
-                      {link.label}
-                    </Link>
-                  );
-                }
-                return (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    onClick={(e) => handleNavClick(e, link)}
-                    className="px-4 py-1.5 text-xs font-medium text-slate-300 hover:text-cyan-300 rounded-full hover:bg-white/[0.07] transition-all duration-200"
-                  >
-                    {link.label}
-                  </a>
-                );
-              })}
+            {/* Desktop Navigation Links */}
+            <div className="hidden md:flex items-center gap-1 bg-slate-100/70 p-1 rounded-full border border-slate-200/50">
+              {[
+                { label: "Home", href: "#home" },
+                { label: "Features", href: "#features" },
+                { label: "AI Assistant", href: "#ai-showcase" },
+                { label: "About", href: "#about" },
+                { label: "Pricing", href: "#pricing" },
+                { label: "FAQs", href: "#faqs" },
+                { label: "Contact", href: "#contact" },
+              ].map((item) => (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  onClick={(e) => handleLinkClick(e, item.href)}
+                  className="px-3.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-full hover:bg-white transition-all duration-200"
+                >
+                  {item.label}
+                </a>
+              ))}
             </div>
 
-            {/* Desktop CTA Buttons */}
+            {/* Right Action Buttons */}
             <div className="hidden md:flex items-center gap-3">
               <Link
                 href="/login"
-                className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-full border border-transparent hover:border-white/[0.08] transition-all duration-200"
+                className="px-4 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 transition-colors"
               >
-                Login
+                Log in
               </Link>
               <Link
                 href="/login"
-                className="relative group inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 shadow-[0_0_20px_rgba(0,120,212,0.35)] hover:shadow-[0_0_25px_rgba(56,189,248,0.5)] hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
+                className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white rounded-full bg-slate-900 hover:bg-slate-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
               >
-                <span>Get Started</span>
-                <Sparkles className="h-3 w-3 text-cyan-200 group-hover:rotate-12 transition-transform" />
+                <span>Start Free</span>
+                <Sparkles className="h-3 w-3 text-cyan-300" />
               </Link>
             </div>
 
-            {/* Mobile Hamburger */}
+            {/* Mobile Hamburger Button */}
             <button
-              onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/[0.06] border border-white/[0.08] transition-colors"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              type="button"
+              className="md:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors"
               aria-label="Toggle menu"
             >
-              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
-          </div>
-        </div>
+          </nav>
 
-        {/* Mobile Menu */}
-        <div
-          className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden px-4 ${
-            mobileOpen ? "max-h-[580px] opacity-100 pb-4" : "max-h-0 opacity-0 pb-0"
-          }`}
-        >
-          <div className="bg-[#0b0f19]/95 backdrop-blur-2xl border border-white/[0.1] p-4 rounded-2xl shadow-2xl space-y-1">
-            {NAV_LINKS.map((link) => {
-              if (link.type === "route") {
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`block px-4 py-2.5 text-sm font-medium rounded-xl transition-colors ${
-                      pathname === link.href
-                        ? "text-cyan-400 bg-cyan-500/10 font-semibold border border-cyan-500/20"
-                        : "text-slate-300 hover:text-cyan-300 hover:bg-white/[0.05]"
-                    }`}
-                  >
-                    {link.label}
-                  </Link>
-                );
-              }
-              return (
+          {/* Mobile Menu Dropdown */}
+          <div
+            className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden mt-2 ${
+              mobileMenuOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0 pointer-events-none"
+            }`}
+          >
+            <div className="bg-white/95 backdrop-blur-2xl border border-slate-200/80 p-4 rounded-2xl shadow-xl space-y-1">
+              {[
+                { label: "Home", href: "#home" },
+                { label: "Features", href: "#features" },
+                { label: "AI Assistant", href: "#ai-showcase" },
+                { label: "About", href: "#about" },
+                { label: "Pricing", href: "#pricing" },
+                { label: "FAQs", href: "#faqs" },
+                { label: "Contact", href: "#contact" },
+              ].map((item) => (
                 <a
-                  key={link.href}
-                  href={link.href}
-                  onClick={(e) => handleNavClick(e, link)}
-                  className="block px-4 py-2.5 text-sm font-medium text-slate-300 hover:text-cyan-300 hover:bg-white/[0.05] rounded-xl transition-colors"
+                  key={item.label}
+                  href={item.href}
+                  onClick={(e) => handleLinkClick(e, item.href)}
+                  className="block px-4 py-2 text-sm font-medium text-slate-700 hover:text-cyan-600 hover:bg-slate-50 rounded-xl transition-colors"
                 >
-                  {link.label}
+                  {item.label}
                 </a>
-              );
-            })}
-            <div className="pt-3 mt-2 border-t border-white/[0.08] flex flex-col gap-2">
-              <Link
-                href="/login"
-                onClick={() => setMobileOpen(false)}
-                className="block px-4 py-2.5 text-sm font-medium text-center text-slate-200 hover:bg-white/[0.06] border border-white/[0.1] rounded-full transition-colors"
-              >
-                Login
-              </Link>
-              <Link
-                href="/login"
-                onClick={() => setMobileOpen(false)}
-                className="block px-4 py-2.5 text-sm font-semibold text-center text-white rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 shadow-[0_0_20px_rgba(0,120,212,0.4)] transition-all"
-              >
-                Get Started Free
-              </Link>
+              ))}
+              <div className="pt-3 mt-2 border-t border-slate-100 flex flex-col gap-2">
+                <Link
+                  href="/login"
+                  className="block px-4 py-2 text-sm font-medium text-center text-slate-700 hover:bg-slate-50 border border-slate-200 rounded-full transition-colors"
+                >
+                  Log in
+                </Link>
+                <Link
+                  href="/login"
+                  className="block px-4 py-2 text-sm font-semibold text-center text-white rounded-full bg-slate-900 hover:bg-slate-800 shadow-md transition-all"
+                >
+                  Start Free Today
+                </Link>
+              </div>
             </div>
           </div>
         </div>
-      </nav>
+      </header>
     </>
   );
 }

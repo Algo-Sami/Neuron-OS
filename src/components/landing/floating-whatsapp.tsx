@@ -19,14 +19,15 @@ export function FloatingWhatsApp() {
           hovered ? "opacity-100 translate-x-0" : "opacity-0 translate-x-2 pointer-events-none"
         }`}
       >
-        <div
-          className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-[#0b0f19]/95 backdrop-blur-md border border-cyan-500/30 shadow-[0_0_20px_rgba(0,0,0,0.5)] whitespace-nowrap"
-        >
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-          <span className="text-xs font-semibold text-slate-200">Chat with Neuron Support</span>
+        <div className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-xl whitespace-nowrap">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-semibold text-slate-800">Chat with Neuron Support</span>
           <button
-            onClick={(e) => { e.stopPropagation(); setDismissed(true); }}
-            className="ml-1 text-slate-400 hover:text-white transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDismissed(true);
+            }}
+            className="ml-1 text-slate-400 hover:text-slate-600 transition-colors"
             aria-label="Dismiss"
           >
             <X className="h-3.5 w-3.5" />
@@ -42,15 +43,14 @@ export function FloatingWhatsApp() {
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label="Chat with Neuron Support on WhatsApp"
-        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 hover:bg-emerald-400 shadow-2xl shadow-emerald-500/40 hover:shadow-emerald-400/60 transition-all duration-300 hover:scale-110 active:scale-100"
+        className="relative flex h-13 w-13 sm:h-14 sm:w-14 items-center justify-center rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 group"
       >
-        {/* Pulse rings */}
-        <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-20" />
-        <span className="absolute inset-[-6px] rounded-full border border-emerald-500/30 animate-pulse" />
+        {/* Subtle cyan pulse ring */}
+        <span className="absolute inset-0 rounded-full border border-cyan-400/30 animate-ping opacity-25" />
 
         {/* WhatsApp icon */}
         <svg
-          className="h-7 w-7 text-white fill-current"
+          className="h-6 w-6 text-emerald-400 fill-current group-hover:scale-110 transition-transform"
           viewBox="0 0 24 24"
           xmlns="http://www.w3.org/2000/svg"
           aria-hidden="true"

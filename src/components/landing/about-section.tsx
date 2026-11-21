@@ -74,7 +74,7 @@ export function AboutSection() {
   return (
     <section
       id="about"
-      className="relative py-20 lg:py-28 bg-[#07090e] border-b border-white/[0.08]"
+      className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
     >
       <div
         ref={sectionRef}
@@ -85,17 +85,17 @@ export function AboutSection() {
           {/* Left: Problem → Solution */}
           <div className="space-y-6 sm:space-y-8">
             <div className="space-y-3.5">
-              <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-rose-500/10 border border-rose-500/20 shadow-xs">
-                <span className="text-xs font-semibold uppercase tracking-wider text-rose-400">
+              <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-rose-50 border border-rose-200/70 shadow-xs">
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-600">
                   The Problem
                 </span>
               </div>
-              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight leading-tight">
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
                 Students Waste{" "}
-                <span className="text-rose-400">Thousands of Hours</span>{" "}
+                <span className="text-rose-600">Thousands of Hours</span>{" "}
                 on Broken Workflows
               </h2>
-              <p className="text-sm sm:text-base text-slate-400 leading-relaxed">
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
                 The average university student juggles 5+ apps just to manage their studies. Notes in one place, deadlines in another, lectures buried in email. Neuron OS solves this.
               </p>
             </div>
@@ -105,15 +105,15 @@ export function AboutSection() {
               {PROBLEMS.map(({ icon, problem, solution }) => (
                 <div
                   key={problem}
-                  className="flex items-center gap-4 p-4 rounded-2xl bg-[#0b0f19]/80 border border-white/[0.08] shadow-xs hover:border-cyan-500/30 hover:bg-[#0d1424]/80 transition-all duration-200"
+                  className="flex items-center gap-4 p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 hover:shadow-md transition-all duration-200"
                 >
                   <span className="text-2xl flex-shrink-0">{icon}</span>
                   <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
-                    <div className="text-xs sm:text-sm text-slate-500 line-through decoration-rose-500/60 font-medium">
+                    <div className="text-xs sm:text-sm text-slate-400 line-through decoration-rose-400/70 font-medium">
                       {problem}
                     </div>
-                    <div className="text-xs sm:text-sm text-emerald-400 font-bold flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] flex-shrink-0" />
+                    <div className="text-xs sm:text-sm text-emerald-600 font-bold flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0" />
                       {solution}
                     </div>
                   </div>
@@ -127,15 +127,15 @@ export function AboutSection() {
             {VALUES.map(({ icon: Icon, title, desc }) => (
               <div
                 key={title}
-                className="p-6 sm:p-7 rounded-2xl sm:rounded-3xl bg-[#0b0f19]/80 border border-white/[0.08] hover:border-cyan-500/40 hover:bg-[#0d1424]/90 hover:shadow-[0_0_30px_rgba(56,189,248,0.1)] hover:-translate-y-1.5 transition-all duration-300 group shadow-xs"
+                className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 hover:border-cyan-300 hover:shadow-xl hover:shadow-cyan-500/5 hover:-translate-y-1.5 transition-all duration-300 group shadow-xs"
               >
-                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 mb-4 group-hover:bg-gradient-to-tr group-hover:from-cyan-500 group-hover:to-blue-600 group-hover:text-white group-hover:border-transparent group-hover:scale-105 transition-all duration-300 shadow-xs">
+                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-600 border border-cyan-100 mb-4 group-hover:bg-slate-900 group-hover:text-white group-hover:scale-105 transition-all duration-300 shadow-xs">
                   <Icon className="h-5 w-5" />
                 </div>
-                <h3 className="text-base font-bold text-white mb-2 group-hover:text-cyan-300 transition-colors">
+                <h3 className="text-base font-bold text-slate-900 mb-2 group-hover:text-cyan-600 transition-colors">
                   {title}
                 </h3>
-                <p className="text-xs sm:text-[13px] text-slate-400 leading-relaxed">
+                <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed">
                   {desc}
                 </p>
               </div>

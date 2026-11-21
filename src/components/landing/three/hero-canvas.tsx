@@ -11,23 +11,31 @@ function subscribe() {
 function WebGLFallback() {
   return (
     <div className="w-full h-full flex items-center justify-center pointer-events-none relative">
-      <div className="relative w-64 h-64 sm:w-80 sm:h-80 flex items-center justify-center">
-        {/* Outer pulsating radial ring */}
-        <div className="absolute inset-0 rounded-full border border-cyan-500/30 animate-ping opacity-25" />
-        <div className="absolute inset-4 rounded-full border border-blue-500/40 animate-pulse" />
-        {/* Core glowing orb */}
-        <div className="w-40 h-40 rounded-full bg-gradient-to-tr from-blue-600 via-cyan-400 to-indigo-600 blur-xl opacity-60 animate-pulse" />
-        <div className="relative z-10 w-28 h-28 rounded-full border border-cyan-300/60 bg-slate-950/80 backdrop-blur-md flex items-center justify-center shadow-[0_0_50px_rgba(56,189,248,0.4)]">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-600 animate-spin" />
+      <div className="relative w-44 h-44 sm:w-56 sm:h-56 flex items-center justify-center">
+        {/* Soft pastel ambient halo */}
+        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-cyan-200/50 via-sky-300/40 to-indigo-200/40 blur-2xl opacity-70 animate-pulse" />
+        <div className="absolute inset-2 rounded-full border border-sky-300/60 animate-ping opacity-25" />
+        <div className="relative z-10 w-24 h-24 rounded-full border border-sky-400/50 bg-white/80 backdrop-blur-md flex items-center justify-center shadow-[0_10px_30px_rgba(14,165,233,0.18)]">
+          <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-600 animate-spin" style={{ animationDuration: "8s" }} />
         </div>
       </div>
     </div>
   );
 }
 
+function checkWebGLSupport() {
+  if (typeof window === "undefined") return false;
+  try {
+    const canvas = document.createElement("canvas");
+    return Boolean(canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
+  } catch {
+    return false;
+  }
+}
+
 export function HeroCanvas() {
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
-  const [hasWebGL, setHasWebGL] = useState(true);
+  const [hasWebGL] = useState(checkWebGLSupport);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -35,16 +43,6 @@ export function HeroCanvas() {
     const checkSize = () => setIsMobile(window.innerWidth < 768);
     checkSize();
     window.addEventListener("resize", checkSize, { passive: true });
-
-    // Detect WebGL capability safely
-    try {
-      const canvas = document.createElement("canvas");
-      const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-      setHasWebGL(Boolean(gl));
-    } catch {
-      setHasWebGL(false);
-    }
-
     return () => window.removeEventListener("resize", checkSize);
   }, []);
 
@@ -57,29 +55,25 @@ export function HeroCanvas() {
   }
 
   return (
-    <div className="w-full h-full relative cursor-grab active:cursor-grabbing select-none">
+    <div className="relative w-full h-full min-h-[300px] sm:min-h-[380px] lg:min-h-[440px] flex items-center justify-center">
       <Canvas
-        camera={{
-          position: [0, 0, isMobile ? 6.2 : 5.4],
-          fov: isMobile ? 50 : 45,
-          near: 0.1,
-          far: 50,
-        }}
-        dpr={[1, Math.min(typeof window !== "undefined" ? window.devicePixelRatio : 1, 2)]}
+        camera={{ position: [0, 0, 5.8], fov: isMobile ? 52 : 46 }}
+        dpr={[1, typeof window !== "undefined" ? Math.min(window.devicePixelRatio, 2) : 1]}
         gl={{
           antialias: true,
           alpha: true,
           powerPreference: "high-performance",
         }}
-        className="w-full h-full !absolute inset-0"
+        className="pointer-events-auto"
       >
-        {/* Lighting setup */}
-        <ambientLight intensity={0.7} color="#0b1329" />
-        <directionalLight position={[6, 8, 5]} intensity={2.6} color="#38bdf8" />
-        <pointLight position={[-6, -4, 3]} intensity={1.8} color="#0078d4" />
-        <pointLight position={[0, 5, -6]} intensity={3.2} color="#a855f7" />
-
         <Suspense fallback={null}>
+          {/* Pristine Light Scene Lighting Rig */}
+          <ambientLight intensity={1.4} />
+          <directionalLight position={[5, 8, 4]} intensity={2.2} color="#f0f9ff" />
+          <directionalLight position={[-5, -3, -3]} intensity={1.2} color="#e0e7ff" />
+          <pointLight position={[0, 0, 0]} intensity={2.5} color="#0ea5e9" distance={6} />
+          <pointLight position={[3, 3, 2]} intensity={1.5} color="#38bdf8" />
+
           <NeuralCoreScene isMobile={isMobile} />
         </Suspense>
       </Canvas>
