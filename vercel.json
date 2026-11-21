@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/check-stalled-jobs",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 6 * * *"
     },
     {
       "path": "/api/cron/finalize-weekly-scores",
