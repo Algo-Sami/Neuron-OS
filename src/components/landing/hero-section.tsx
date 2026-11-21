@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Play, Zap, Brain, BookOpen } from "lucide-react";
+import { ArrowRight, Play } from "lucide-react";
 import { HeroCanvas } from "./three/hero-canvas";
 
 export function HeroSection() {
   return (
     <section
       id="home"
-      className="relative min-h-[92vh] flex flex-col justify-center overflow-hidden bg-white pt-28 sm:pt-36 pb-20"
+      className="relative min-h-[82vh] flex flex-col justify-center overflow-hidden bg-white pt-28 sm:pt-36 pb-24 sm:pb-32"
     >
       {/* Full Hero 3D Spatial Canvas Layer */}
       <HeroCanvas />
@@ -89,137 +89,6 @@ export function HeroSection() {
             <span>Used by 1,200+ students across top universities</span>
             <span>·</span>
             <span className="text-amber-500 font-bold">★ 4.9/5</span>
-          </div>
-        </div>
-
-        {/* Elevated Workspace Preview Card (Wasmer inspired) */}
-        <div className="w-full max-w-5xl mx-auto mt-14 sm:mt-18 relative">
-          <div className="absolute -inset-2 bg-gradient-to-r from-cyan-100 via-sky-100 to-indigo-100 rounded-[2.5rem] blur-xl opacity-60 pointer-events-none" />
-
-          <div className="relative rounded-2xl sm:rounded-3xl overflow-hidden border border-slate-200/90 bg-white shadow-[0_20px_50px_-12px_rgba(15,23,42,0.08),0_1px_3px_rgba(0,0,0,0.04)]">
-            {/* Window bar */}
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 bg-slate-50/80 border-b border-slate-200/70">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1.5">
-                  <span className="h-3 w-3 rounded-full bg-rose-400" />
-                  <span className="h-3 w-3 rounded-full bg-amber-400" />
-                  <span className="h-3 w-3 rounded-full bg-emerald-400" />
-                </div>
-                <span className="text-xs font-semibold text-slate-600 ml-2 hidden sm:inline">
-                  Neuron OS — Academic Workspace
-                </span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1 bg-white border border-slate-200/80 rounded-full text-[11px] text-slate-600 font-mono shadow-xs">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>app.neuronos.ai/dashboard</span>
-              </div>
-            </div>
-
-            {/* Inset Dashboard Body */}
-            <div className="p-4 sm:p-7 min-h-[300px] grid grid-cols-12 gap-4 sm:gap-6 text-left bg-white">
-              {/* Left sidebar nav */}
-              <div className="col-span-3 hidden sm:flex flex-col gap-1.5 border-r border-slate-100 pr-4">
-                <div className="h-8.5 rounded-xl bg-slate-900 text-white flex items-center px-3 gap-2.5 text-xs font-semibold shadow-xs">
-                  <Brain className="h-4 w-4 text-cyan-400" />
-                  <span>Dashboard</span>
-                </div>
-                <div className="h-8 rounded-xl flex items-center px-3 gap-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                  <span>Subjects</span>
-                </div>
-                <div className="h-8 rounded-xl flex items-center px-3 gap-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                  <span>Uploads</span>
-                </div>
-                <div className="h-8 rounded-xl flex items-center px-3 gap-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                  <span>Summaries</span>
-                </div>
-                <div className="h-8 rounded-xl flex items-center px-3 gap-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                  <span>Quizzes</span>
-                </div>
-                <div className="h-8 rounded-xl flex items-center px-3 gap-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                  <span>Reminders</span>
-                </div>
-              </div>
-
-              {/* Right main panel */}
-              <div className="col-span-12 sm:col-span-9 space-y-4">
-                {/* 4 Stat chips */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
-                  <div className="rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
-                    <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Subjects</div>
-                    <div className="text-xl font-bold text-slate-900 mt-0.5">8</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
-                    <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Summaries</div>
-                    <div className="text-xl font-bold text-cyan-600 mt-0.5">34</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
-                    <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Quizzes</div>
-                    <div className="text-xl font-bold text-emerald-600 mt-0.5">12</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200/70 p-3 bg-slate-50/60">
-                    <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">XP Points</div>
-                    <div className="text-xl font-bold text-amber-600 mt-0.5">2,840</div>
-                  </div>
-                </div>
-
-                {/* AI Summary card */}
-                <div className="rounded-xl bg-cyan-50/40 border border-cyan-100 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Zap className="h-4 w-4 text-cyan-600" />
-                      <span className="text-xs sm:text-sm font-bold text-slate-900">
-                        Operating Systems Lecture 7: Virtual Memory
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-semibold text-cyan-700 bg-cyan-100/80 px-2.5 py-0.5 rounded-full">
-                      AI Verified
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Paging, page tables, segmentation, and translation lookaside buffer (TLB) mechanisms extracted into key recall cards.
-                  </p>
-                </div>
-
-                {/* Split recent uploads & deadlines */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-slate-200/70 p-3.5 space-y-2 bg-white">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                      <BookOpen className="h-3.5 w-3.5 text-cyan-600" />
-                      <span>Recent Course Materials</span>
-                    </div>
-                    <div className="text-xs text-slate-600 space-y-1">
-                      <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                        <span className="font-medium truncate">OS_Lecture_7.pdf</span>
-                        <span className="text-[10px] text-slate-400">2.4 MB</span>
-                      </div>
-                      <div className="flex items-center justify-between py-1">
-                        <span className="font-medium truncate">DB_Normalization.docx</span>
-                        <span className="text-[10px] text-slate-400">1.1 MB</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200/70 p-3.5 space-y-2 bg-white">
-                    <div className="text-xs font-bold text-slate-800">Smart Deadlines</div>
-                    <div className="text-xs space-y-1">
-                      <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-600">OS Assignment 3</span>
-                        <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">2 days</span>
-                      </div>
-                      <div className="flex items-center justify-between py-1">
-                        <span className="text-slate-600">DB Lab Report</span>
-                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">5 days</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>

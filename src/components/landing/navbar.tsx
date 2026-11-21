@@ -61,7 +61,6 @@ export function LandingNavbar() {
                 { label: "About", href: "#about" },
                 { label: "Pricing", href: "#pricing" },
                 { label: "FAQs", href: "#faqs" },
-                { label: "Contact", href: "#contact" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -116,7 +115,6 @@ export function LandingNavbar() {
                 { label: "About", href: "#about" },
                 { label: "Pricing", href: "#pricing" },
                 { label: "FAQs", href: "#faqs" },
-                { label: "Contact", href: "#contact" },
               ].map((item) => (
                 <a
                   key={item.label}

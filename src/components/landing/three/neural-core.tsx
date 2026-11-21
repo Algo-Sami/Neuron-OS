@@ -154,9 +154,9 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
           <meshStandardMaterial
             color="#0ea5e9"
             emissive="#38bdf8"
-            emissiveIntensity={0.65}
-            roughness={0.25}
-            metalness={0.2}
+            emissiveIntensity={0.4}
+            roughness={0.3}
+            metalness={0.1}
             wireframe
           />
         </mesh>
@@ -164,18 +164,18 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
         {/* Central Crystal Core */}
         <mesh ref={coreRef} geometry={coreGeometry}>
           <meshPhysicalMaterial
-            color="#e0f2fe"
+            color="#f0f9ff"
             emissive="#0284c7"
-            emissiveIntensity={0.3}
-            roughness={0.15}
-            metalness={0.1}
+            emissiveIntensity={0.2}
+            roughness={0.2}
+            metalness={0.05}
             clearcoat={1}
-            clearcoatRoughness={0.1}
-            transmission={0.85}
-            ior={1.4}
-            thickness={1.2}
+            clearcoatRoughness={0.15}
+            transmission={0.92}
+            ior={1.3}
+            thickness={1}
             transparent
-            opacity={0.88}
+            opacity={0.6}
           />
         </mesh>
 
@@ -185,8 +185,8 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
             color="#0284c7"
             wireframe
             transparent
-            opacity={0.32}
-            roughness={0.4}
+            opacity={0.22}
+            roughness={0.5}
           />
         </mesh>
 
@@ -196,24 +196,24 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
             <meshStandardMaterial
               color="#0ea5e9"
               transparent
-              opacity={0.38}
-              roughness={0.3}
+              opacity={0.25}
+              roughness={0.4}
             />
           </mesh>
           <mesh geometry={ringGeometry2} rotation={[-Math.PI / 4, 0, Math.PI / 5]}>
             <meshStandardMaterial
               color="#6366f1"
               transparent
-              opacity={0.28}
-              roughness={0.3}
+              opacity={0.18}
+              roughness={0.4}
             />
           </mesh>
           <mesh geometry={ringGeometry3} rotation={[Math.PI / 6, -Math.PI / 4, Math.PI / 3]}>
             <meshStandardMaterial
               color="#0284c7"
               transparent
-              opacity={0.2}
-              roughness={0.3}
+              opacity={0.14}
+              roughness={0.4}
             />
           </mesh>
         </group>
@@ -225,9 +225,9 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
               <meshStandardMaterial
                 color={sat.color}
                 emissive={sat.color}
-                emissiveIntensity={0.5}
-                roughness={0.2}
-                metalness={0.4}
+                emissiveIntensity={0.35}
+                roughness={0.3}
+                metalness={0.3}
               />
             </mesh>
           ))}
@@ -236,10 +236,10 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
         {/* Ambient Spatial Dust Particles */}
         <points ref={particlesRef} geometry={particlesGeometry}>
           <pointsMaterial
-            size={0.05}
+            size={0.04}
             color="#38bdf8"
             transparent
-            opacity={0.45}
+            opacity={0.3}
             sizeAttenuation
           />
         </points>

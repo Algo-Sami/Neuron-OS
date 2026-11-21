@@ -16,11 +16,11 @@ const FOOTER_LINKS = {
     { label: "Documentation", href: "#", hash: false },
     { label: "Blog", href: "#", hash: false },
     { label: "Tutorials", href: "#", hash: false },
-    { label: "Support", href: "#contact", hash: true },
+    { label: "Support", href: "mailto:neuronosofficial@gmail.com", hash: false },
   ],
   Company: [
     { label: "About", href: "#about", hash: true },
-    { label: "Contact", href: "#contact", hash: true },
+    { label: "Contact", href: "mailto:neuronosofficial@gmail.com", hash: false },
     { label: "Privacy Policy", href: "#", hash: false },
     { label: "Terms of Service", href: "#", hash: false },
     { label: "Cookie Policy", href: "#", hash: false },

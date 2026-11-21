@@ -48,7 +48,7 @@ export function HeroCanvas() {
   }
 
   return (
-    <div className="absolute inset-0 w-full h-full pointer-events-none">
+    <div className="absolute inset-0 w-full h-full pointer-events-none opacity-35 sm:opacity-40 transition-opacity duration-700">
       <Canvas
         camera={{ position: [0, 0, 7.2], fov: isMobile ? 54 : 44 }}
         dpr={[1, typeof window !== "undefined" ? Math.min(window.devicePixelRatio, 1.5) : 1]}
