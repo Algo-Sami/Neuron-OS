@@ -61,7 +61,7 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
   const cageGeometry = useMemo(() => new THREE.IcosahedronGeometry(isMobile ? 1.6 : 2.1, 1), [isMobile]);
   const innerGeometry = useMemo(() => new THREE.IcosahedronGeometry(isMobile ? 1.15 : 1.45, 2), [isMobile]);
   const coreGeometry = useMemo(() => new THREE.SphereGeometry(isMobile ? 0.75 : 0.95, 32, 32), [isMobile]);
-  const satelliteGeometry = useMemo(() => new THREE.DodecahedronGeometry(0.18, 0), []);
+  const satelliteGeometry = useMemo(() => new THREE.DodecahedronGeometry(0.14, 0), []);
   const ringGeometry1 = useMemo(() => new THREE.TorusGeometry(isMobile ? 2.4 : 3.1, 0.012, 16, 120), [isMobile]);
   const ringGeometry2 = useMemo(() => new THREE.TorusGeometry(isMobile ? 2.8 : 3.7, 0.01, 16, 120), [isMobile]);
   const ringGeometry3 = useMemo(() => new THREE.TorusGeometry(isMobile ? 3.2 : 4.3, 0.008, 16, 120), [isMobile]);
@@ -95,9 +95,9 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
       groupRef.current.rotation.x = THREE.MathUtils.damp(groupRef.current.rotation.x, targetRotationX, 3, delta);
 
       // Scroll response: smoothly glides downward and recedes in 3D depth as user scrolls
-      const targetPosY = (isMobile ? 0.2 : 0.45) - sy * 0.0022;
+      const targetPosY = (isMobile ? 0.55 : 0.9) - sy * 0.0022;
       groupRef.current.position.y = THREE.MathUtils.damp(groupRef.current.position.y, targetPosY, 3.5, delta);
-      const targetPosZ = -sy * 0.0008;
+      const targetPosZ = -0.3 - sy * 0.0008;
       groupRef.current.position.z = THREE.MathUtils.damp(groupRef.current.position.z, targetPosZ, 3.5, delta);
     }
 
@@ -133,7 +133,7 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
         if (!sat) return;
         const angle = t * sat.speed + sat.phase;
         child.position.x = Math.cos(angle) * sat.radius;
-        child.position.z = Math.sin(angle) * sat.radius;
+        child.position.z = Math.sin(angle) * sat.radius - 0.25;
         child.position.y = sat.yOffset + Math.sin(t * 1.4 + index) * 0.18;
         child.rotation.x += delta * 0.7;
         child.rotation.y += delta * 1.1;
@@ -147,7 +147,7 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
   });
 
   return (
-    <group ref={groupRef} position={[0, isMobile ? 0.2 : 0.45, 0]}>
+    <group ref={groupRef} position={[0, isMobile ? 0.55 : 0.9, -0.3]}>
       <Float speed={1.6} rotationIntensity={0.2} floatIntensity={0.5}>
         {/* Central Luminous Nucleus (Cyan-Blue Light Theme) */}
         <mesh ref={innerNucleusRef} geometry={innerGeometry}>
