@@ -4,6 +4,7 @@ import React, { useRef, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { Float } from "@react-three/drei";
+import { getPrefersReducedMotion } from "@/lib/motion";
 
 interface NeuralCoreProps {
   isMobile?: boolean;
@@ -21,8 +22,11 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
   // Global cursor & scroll trackers for full-section interactivity
   const mouseRef = useRef({ x: 0, y: 0 });
   const scrollRef = useRef(0);
+  const isReducedMotion = useRef(false);
 
   useEffect(() => {
+    isReducedMotion.current = getPrefersReducedMotion();
+
     const handlePointerMove = (e: MouseEvent) => {
       // Normalized device coordinates (-1 to 1)
       mouseRef.current.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -82,6 +86,15 @@ export function NeuralCoreScene({ isMobile = false }: NeuralCoreProps) {
 
   // Frame animation loop - direct ref mutations, zero re-renders
   useFrame((state, delta) => {
+    // Accessibility: preserve static calm pose when reduced motion is preferred
+    if (isReducedMotion.current) {
+      if (groupRef.current) {
+        groupRef.current.position.set(0, isMobile ? 0.55 : 0.9, -0.3);
+        groupRef.current.rotation.set(0, 0, 0);
+      }
+      return;
+    }
+
     const t = state.clock.getElapsedTime();
     const mx = mouseRef.current.x;
     const my = mouseRef.current.y;

@@ -1,13 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Sparkles, Menu, X } from "lucide-react";
+import { gsap, useGSAP, motion, getPrefersReducedMotion } from "@/lib/motion";
 
 export function LandingNavbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
 
+  // Initial smooth appearance
+  useGSAP(
+    () => {
+      if (getPrefersReducedMotion()) {
+        gsap.set(headerRef.current, { opacity: 1, y: 0, clearProps: "all" });
+        return;
+      }
+
+      gsap.fromTo(
+        headerRef.current,
+        { opacity: 0, y: -16 },
+        { opacity: 1, y: 0, duration: 0.6, ease: motion.ease.smooth }
+      );
+    },
+    { scope: headerRef }
+  );
+
+  // Scroll state listener
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
@@ -15,6 +35,17 @@ export function LandingNavbar() {
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  // Keyboard accessibility: Escape closes mobile menu
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && mobileMenuOpen) {
+        setMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileMenuOpen]);
 
   const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     if (href.startsWith("#") && href.length > 1) {
@@ -28,7 +59,10 @@ export function LandingNavbar() {
   return (
     <>
       {/* Floating Pill Navbar */}
-      <header className="fixed top-4 sm:top-5 left-0 right-0 z-40 px-4 sm:px-6 lg:px-8 transition-all duration-300">
+      <header
+        ref={headerRef}
+        className="fixed top-4 sm:top-5 left-0 right-0 z-40 px-4 sm:px-6 lg:px-8 transition-all duration-300"
+      >
         <div className="max-w-6xl mx-auto">
           <nav
             className={`flex items-center justify-between rounded-full px-5 sm:px-6 py-2.5 transition-all duration-300 ${
@@ -96,6 +130,7 @@ export function LandingNavbar() {
               type="button"
               className="md:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors"
               aria-label="Toggle menu"
+              aria-expanded={mobileMenuOpen}
             >
               {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
@@ -104,7 +139,7 @@ export function LandingNavbar() {
           {/* Mobile Menu Dropdown */}
           <div
             className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden mt-2 ${
-              mobileMenuOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0 pointer-events-none"
+              mobileMenuOpen ? "max-h-96 opacity-100 translate-y-0" : "max-h-0 opacity-0 -translate-y-2 pointer-events-none"
             }`}
           >
             <div className="bg-white/95 backdrop-blur-2xl border border-slate-200/80 p-4 rounded-2xl shadow-xl space-y-1">

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { MessageCircle, Mail, MapPin, Clock, Send, CheckCircle, Loader2 } from "lucide-react";
+import { gsap, useGSAP, motion, getPrefersReducedMotion } from "@/lib/motion";
 
 function LinkedInIcon({ className }: { className?: string }) {
   return (
@@ -57,7 +58,7 @@ const BUSINESS_INFO = [
 ];
 
 export function ContactSection() {
-  const sectionRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const [formState, setFormState] = useState({
     name: "",
     email: "",
@@ -66,6 +67,96 @@ export function ContactSection() {
   });
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useGSAP(
+    () => {
+      if (getPrefersReducedMotion()) {
+        gsap.set(
+          [
+            "[data-contact-badge]",
+            "[data-contact-title]",
+            "[data-contact-desc]",
+            "[data-contact-card]",
+            "[data-business-info]",
+            "[data-contact-form]",
+          ],
+          { opacity: 1, x: 0, y: 0, scale: 1, clearProps: "all" }
+        );
+        return;
+      }
+
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          start: "top 75%",
+          once: true,
+        },
+        defaults: { ease: motion.ease.standard },
+        onComplete: () => {
+          gsap.set("[data-contact-card], [data-contact-form]", {
+            clearProps: "willChange",
+          });
+        },
+      });
+
+      // 1. Header sequence
+      tl.fromTo(
+        "[data-contact-badge]",
+        { opacity: 0, y: 12, scale: 0.95 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: motion.ease.spring },
+        0
+      )
+        .fromTo(
+          "[data-contact-title]",
+          { opacity: 0, y: 20 },
+          { opacity: 1, y: 0, duration: motion.duration.normal, ease: motion.ease.smooth },
+          0.1
+        )
+        .fromTo(
+          "[data-contact-desc]",
+          { opacity: 0, y: 14 },
+          { opacity: 1, y: 0, duration: 0.55, ease: motion.ease.smooth },
+          0.2
+        )
+
+        // 2. Left contact cards staggered slide
+        .fromTo(
+          "[data-contact-card]",
+          { opacity: 0, x: -20 },
+          {
+            opacity: 1,
+            x: 0,
+            duration: 0.6,
+            stagger: 0.08,
+            ease: motion.ease.standard,
+          },
+          0.25
+        )
+
+        // 3. Business info card reveal
+        .fromTo(
+          "[data-business-info]",
+          { opacity: 0, y: 16 },
+          { opacity: 1, y: 0, duration: 0.5, ease: motion.ease.smooth },
+          0.45
+        )
+
+        // 4. Right form elevation entrance
+        .fromTo(
+          "[data-contact-form]",
+          { opacity: 0, y: 28, scale: 0.98 },
+          {
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            duration: 0.65,
+            ease: motion.ease.standard,
+          },
+          0.3
+        );
+    },
+    { scope: sectionRef }
+  );
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -101,24 +192,32 @@ export function ContactSection() {
 
   return (
     <section
+      ref={sectionRef}
       id="contact"
       className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
     >
-      <div
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-      >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center mb-14 sm:mb-16 space-y-3.5">
-          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-800 shadow-xs">
+          <div
+            data-contact-badge
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-800 shadow-xs"
+          >
             <MessageCircle className="h-3.5 w-3.5 text-cyan-600" />
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">
               Get In Touch
             </span>
           </div>
-          <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+          <h2
+            data-contact-title
+            className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight"
+          >
             We&apos;re Here to <span className="text-cyan-600">Help</span>
           </h2>
-          <p className="text-sm sm:text-base text-slate-600 max-w-xl mx-auto">
+          <p
+            data-contact-desc
+            className="text-sm sm:text-base text-slate-600 max-w-xl mx-auto"
+          >
             Reach out through any channel — we respond fast. Real humans, real support.
           </p>
         </div>
@@ -131,10 +230,11 @@ export function ContactSection() {
               {CONTACT_CARDS.map(({ icon: Icon, title, value, subtitle, href, badge, external }) => (
                 <a
                   key={title}
+                  data-contact-card
                   href={href}
                   target={external ? "_blank" : undefined}
                   rel={external ? "noopener noreferrer" : undefined}
-                  className="group relative flex items-start gap-4 p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-200/50 hover:-translate-y-1 transition-all duration-300"
+                  className="group relative flex items-start gap-4 p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-200/50 hover:-translate-y-1 transition-all duration-300 will-change-transform"
                 >
                   {badge && (
                     <span className="absolute top-3.5 right-3.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -158,7 +258,10 @@ export function ContactSection() {
             </div>
 
             {/* Business info */}
-            <div className="p-5 sm:p-6 rounded-2xl bg-[#f8fafc] border border-slate-200/80 space-y-3.5">
+            <div
+              data-business-info
+              className="p-5 sm:p-6 rounded-2xl bg-[#f8fafc] border border-slate-200/80 space-y-3.5"
+            >
               <div className="text-xs font-bold uppercase tracking-wider text-slate-600">
                 Support Details
               </div>
@@ -184,7 +287,10 @@ export function ContactSection() {
 
           {/* Right: Contact form */}
           <div className="lg:col-span-3">
-            <div className="p-6 sm:p-8 rounded-3xl bg-white border border-slate-200/80 shadow-lg shadow-slate-900/5">
+            <div
+              data-contact-form
+              className="p-6 sm:p-8 rounded-3xl bg-white border border-slate-200/80 shadow-lg shadow-slate-900/5 will-change-transform"
+            >
               <div className="mb-6 space-y-1">
                 <h3 className="text-xl font-extrabold text-slate-900">Send a Message</h3>
                 <p className="text-xs sm:text-sm text-slate-500">
@@ -193,7 +299,7 @@ export function ContactSection() {
               </div>
 
               {status === "success" ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3.5">
+                <div className="flex flex-col items-center justify-center py-12 gap-3.5 animate-in fade-in zoom-in-95 duration-300">
                   <div className="h-14 w-14 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center">
                     <CheckCircle className="h-7 w-7 text-emerald-600" />
                   </div>

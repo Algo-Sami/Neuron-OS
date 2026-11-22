@@ -23,34 +23,61 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check Stalled Jobs
-        if: github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *' || github.event.inputs.job == 'check-stalled-jobs' || github.event.inputs.job == 'all'
+        if: (github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *') || github.event.inputs.job == 'check-stalled-jobs' || github.event.inputs.job == 'all'
         run: |
-          echo "Triggering check-stalled-jobs..."
-          RESPONSE=$(curl -sSL -w "\nHTTP_STATUS:%{http_code}\n" -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/check-stalled-jobs" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          APP_URL="${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}"
+          if [ -z "$APP_URL" ]; then
+            echo "⚠️ Notice: NEXT_PUBLIC_APP_URL / APP_URL secret is not configured in GitHub repository secrets."
+            echo "Cron jobs are already managed natively on Vercel via vercel.json."
+            echo "To enable this external GitHub Actions watchdog, configure NEXT_PUBLIC_APP_URL and CRON_SECRET in GitHub repo secrets."
+            exit 0
+          fi
+
+          echo "Triggering check-stalled-jobs at $APP_URL..."
+          CRON_SECRET="${{ secrets.CRON_SECRET }}"
+          AUTH_HEADER=""
+          if [ -n "$CRON_SECRET" ]; then
+            AUTH_HEADER="Authorization: Bearer $CRON_SECRET"
+          fi
+
+          RESPONSE=$(curl -sSL -w "\nHTTP_STATUS:%{http_code}\n" -X GET "${APP_URL%/}/api/cron/check-stalled-jobs" \
+            ${AUTH_HEADER:+-H "$AUTH_HEADER"})
           echo "$RESPONSE"
-          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d: -f2)
-          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
-            echo "Request failed with status $STATUS"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d: -f2 | tr -d '[:space:]')
+          if [ -z "$STATUS" ] || [ "$STATUS" = "000" ] || [ "$STATUS" -ge 400 ]; then
+            echo "Request failed with status: ${STATUS:-unknown}"
             exit 1
           fi
 
       - name: Keepalive Render Worker
-        if: github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *' || github.event.inputs.job == 'check-stalled-jobs' || github.event.inputs.job == 'all'
+        if: (github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *') || github.event.inputs.job == 'check-stalled-jobs' || github.event.inputs.job == 'all'
         run: |
           WORKER_URL="${{ secrets.RENDER_WORKER_URL || 'https://neuron-worker.onrender.com' }}"
           echo "Sending keepalive ping to Render worker ($WORKER_URL)..."
           curl -sSL -m 15 "$WORKER_URL" || echo "Worker ping sent (may be spinning up)"
 
       - name: Finalize Weekly Scores
-        if: github.event_name == 'schedule' && github.event.schedule == '55 23 * * 0' || github.event.inputs.job == 'finalize-weekly-scores' || github.event.inputs.job == 'all'
+        if: (github.event_name == 'schedule' && github.event.schedule == '55 23 * * 0') || github.event.inputs.job == 'finalize-weekly-scores' || github.event.inputs.job == 'all'
         run: |
-          echo "Triggering finalize-weekly-scores..."
-          RESPONSE=$(curl -sSL -w "\nHTTP_STATUS:%{http_code}\n" -X GET "${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}/api/cron/finalize-weekly-scores" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          APP_URL="${{ secrets.NEXT_PUBLIC_APP_URL || secrets.APP_URL }}"
+          if [ -z "$APP_URL" ]; then
+            echo "⚠️ Notice: NEXT_PUBLIC_APP_URL / APP_URL secret is not configured in GitHub repository secrets."
+            echo "Weekly scores cron is handled natively on Vercel via vercel.json (schedule: 55 23 * * 0)."
+            exit 0
+          fi
+
+          echo "Triggering finalize-weekly-scores at $APP_URL..."
+          CRON_SECRET="${{ secrets.CRON_SECRET }}"
+          AUTH_HEADER=""
+          if [ -n "$CRON_SECRET" ]; then
+            AUTH_HEADER="Authorization: Bearer $CRON_SECRET"
+          fi
+
+          RESPONSE=$(curl -sSL -w "\nHTTP_STATUS:%{http_code}\n" -X GET "${APP_URL%/}/api/cron/finalize-weekly-scores" \
+            ${AUTH_HEADER:+-H "$AUTH_HEADER"})
           echo "$RESPONSE"
-          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d: -f2)
-          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
-            echo "Request failed with status $STATUS"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d: -f2 | tr -d '[:space:]')
+          if [ -z "$STATUS" ] || [ "$STATUS" = "000" ] || [ "$STATUS" -ge 400 ]; then
+            echo "Request failed with status: ${STATUS:-unknown}"
             exit 1
           fi

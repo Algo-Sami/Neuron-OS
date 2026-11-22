@@ -7,6 +7,7 @@ import { StatsSection } from "./stats-section";
 import { TestimonialsSection } from "./testimonials-section";
 import { PricingSection } from "./pricing-section";
 import { FAQSection } from "./faq-section";
+import { ContactSection } from "./contact-section";
 import { LandingFooter } from "./footer";
 import { FloatingWhatsApp } from "./floating-whatsapp";
 
@@ -22,6 +23,7 @@ export function LandingPage() {
       <TestimonialsSection />
       <PricingSection />
       <FAQSection />
+      <ContactSection />
       <LandingFooter />
       <FloatingWhatsApp />
     </div>

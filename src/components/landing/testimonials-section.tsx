@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { gsap, useGSAP, motion, getPrefersReducedMotion } from "@/lib/motion";
 
 const TESTIMONIALS = [
   {
@@ -66,15 +67,15 @@ function TestimonialCard({
   initials,
   rating,
   review,
-  index,
-}: (typeof TESTIMONIALS)[number] & { index: number }) {
+}: (typeof TESTIMONIALS)[number]) {
   return (
     <div
-      className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 hover:border-slate-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group shadow-xs"
+      data-testimonial-card
+      className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 hover:border-slate-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group shadow-xs will-change-transform"
     >
       <div>
         {/* Stars */}
-        <div className="flex gap-1 text-amber-400 text-sm">
+        <div className="flex gap-1 text-amber-400 text-sm group-hover:scale-105 transition-transform duration-300 origin-left">
           {Array.from({ length: rating }).map((_, i) => (
             <span key={i}>★</span>
           ))}
@@ -88,12 +89,16 @@ function TestimonialCard({
 
       {/* Author */}
       <div className="flex items-center gap-3 pt-3.5 border-t border-slate-100">
-        <div className="h-10 w-10 rounded-full bg-slate-900 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 shadow-xs ring-2 ring-slate-100">
+        <div className="h-10 w-10 rounded-full bg-slate-900 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 shadow-xs ring-2 ring-slate-100 group-hover:ring-cyan-200 group-hover:scale-105 transition-all duration-300">
           {initials}
         </div>
         <div>
-          <div className="text-sm font-bold text-slate-900 group-hover:text-cyan-600 transition-colors">{name}</div>
-          <div className="text-xs text-slate-500">{role} · {university}</div>
+          <div className="text-sm font-bold text-slate-900 group-hover:text-cyan-600 transition-colors">
+            {name}
+          </div>
+          <div className="text-xs text-slate-500">
+            {role} · {university}
+          </div>
         </div>
       </div>
     </div>
@@ -101,37 +106,132 @@ function TestimonialCard({
 }
 
 export function TestimonialsSection() {
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useGSAP(
+    () => {
+      // Accessibility guard: immediately resolve static layout for reduced motion preference
+      if (getPrefersReducedMotion()) {
+        gsap.set(
+          [
+            "[data-testimonials-badge]",
+            "[data-testimonials-title]",
+            "[data-testimonials-desc]",
+            "[data-testimonial-card]",
+            "[data-trust-bar]",
+          ],
+          { opacity: 1, x: 0, y: 0, scale: 1, clearProps: "all" }
+        );
+        return;
+      }
+
+      // Master section timeline
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          start: "top 75%",
+          once: true,
+        },
+        defaults: { ease: motion.ease.standard },
+        onComplete: () => {
+          gsap.set("[data-testimonial-card], [data-trust-bar]", {
+            clearProps: "willChange",
+          });
+        },
+      });
+
+      // 1. Header sequence
+      tl.fromTo(
+        "[data-testimonials-badge]",
+        { opacity: 0, y: 12, scale: 0.95 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: motion.ease.spring },
+        0
+      )
+        .fromTo(
+          "[data-testimonials-title]",
+          { opacity: 0, y: 20 },
+          { opacity: 1, y: 0, duration: motion.duration.normal, ease: motion.ease.smooth },
+          0.1
+        )
+        .fromTo(
+          "[data-testimonials-desc]",
+          { opacity: 0, y: 14 },
+          { opacity: 1, y: 0, duration: 0.55, ease: motion.ease.smooth },
+          0.2
+        )
+
+        // 2. Testimonial cards staggered cascade
+        .fromTo(
+          "[data-testimonial-card]",
+          { opacity: 0, y: 28, scale: 0.98 },
+          {
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            duration: 0.65,
+            stagger: 0.08,
+            ease: motion.ease.standard,
+          },
+          0.25
+        )
+
+        // 3. Bottom trust bar reveal
+        .fromTo(
+          "[data-trust-bar]",
+          { opacity: 0, y: 16, scale: 0.98 },
+          {
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            duration: 0.55,
+            ease: motion.ease.spring,
+          },
+          0.6
+        );
+    },
+    { scope: sectionRef }
+  );
+
   return (
     <section
+      ref={sectionRef}
+      id="testimonials"
       className="relative py-20 lg:py-28 bg-[#f8fafc] border-b border-slate-200/70"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div
-          className="text-center mb-14 sm:mb-16 space-y-3.5"
-        >
-          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white border border-slate-200 shadow-xs">
+        <div className="text-center mb-14 sm:mb-16 space-y-3.5">
+          <div
+            data-testimonials-badge
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white border border-slate-200 shadow-xs"
+          >
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">
               Student Reviews
             </span>
           </div>
-          <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+          <h2
+            data-testimonials-title
+            className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight"
+          >
             Loved by <span className="text-cyan-600">Students</span>
           </h2>
-          <p className="text-sm sm:text-base text-slate-600 max-w-xl mx-auto">
+          <p
+            data-testimonials-desc
+            className="text-sm sm:text-base text-slate-600 max-w-xl mx-auto"
+          >
             Real feedback from students who transformed their academic workflows with Neuron OS.
           </p>
         </div>
 
         {/* Testimonial grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
-          {TESTIMONIALS.map((t, i) => (
-            <TestimonialCard key={t.name} {...t} index={i} />
+          {TESTIMONIALS.map((t) => (
+            <TestimonialCard key={t.name} {...t} />
           ))}
         </div>
 
         {/* Bottom trust bar */}
-        <div className="mt-12 flex justify-center">
+        <div data-trust-bar className="mt-12 flex justify-center">
           <div className="inline-flex flex-wrap items-center justify-center gap-5 sm:gap-8 text-xs text-slate-600 bg-white border border-slate-200/80 px-6 py-3 rounded-full shadow-xs">
             <div className="flex items-center gap-1.5">
               <span className="flex gap-0.5 text-amber-500 font-bold">★★★★★</span>

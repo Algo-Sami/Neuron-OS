@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import {
   Brain,
   FileText,
@@ -11,6 +12,7 @@ import {
   ShieldCheck,
   ArrowUpRight,
 } from "lucide-react";
+import { gsap, useGSAP, motion, getPrefersReducedMotion } from "@/lib/motion";
 
 const FEATURES = [
   {
@@ -72,23 +74,104 @@ const FEATURES = [
 ];
 
 export function FeaturesSection() {
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useGSAP(
+    () => {
+      // Accessibility guard: immediately display final static state for reduced-motion users
+      if (getPrefersReducedMotion()) {
+        gsap.set(
+          [
+            "[data-feature-badge]",
+            "[data-feature-heading]",
+            "[data-feature-sub]",
+            "[data-feature-card]",
+          ],
+          { opacity: 1, y: 0, scale: 1, clearProps: "all" }
+        );
+        return;
+      }
+
+      // Master section timeline triggered when features enter 75% viewport
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          start: "top 75%",
+          once: true,
+        },
+        defaults: { ease: motion.ease.standard },
+        onComplete: () => {
+          // Clean up GPU will-change hints after animation settles
+          gsap.set("[data-feature-card]", { clearProps: "willChange" });
+        },
+      });
+
+      // 1. Header badge: subtle scale & fade
+      tl.fromTo(
+        "[data-feature-badge]",
+        { opacity: 0, y: 12, scale: 0.95 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: motion.ease.spring },
+        0
+      )
+
+      // 2. Main section heading: smooth vertical reveal
+      .fromTo(
+        "[data-feature-heading]",
+        { opacity: 0, y: 18 },
+        { opacity: 1, y: 0, duration: motion.duration.normal, ease: motion.ease.smooth },
+        0.12
+      )
+
+      // 3. Subtitle description
+      .fromTo(
+        "[data-feature-sub]",
+        { opacity: 0, y: 14 },
+        { opacity: 1, y: 0, duration: 0.55, ease: motion.ease.smooth },
+        0.24
+      )
+
+      // 4. Staggered 8-card cascade (opacity + subtle y elevation)
+      .fromTo(
+        "[data-feature-card]",
+        { opacity: 0, y: 28 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.65,
+          stagger: 0.07,
+          ease: motion.ease.standard,
+        },
+        0.35
+      );
+    },
+    { scope: sectionRef }
+  );
+
   return (
     <section
+      ref={sectionRef}
       id="features"
       className="relative py-20 lg:py-28 bg-white border-b border-slate-200/70"
     >
-      <div
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-      >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header (Wasmer inspired) */}
         <div className="text-center mb-14 sm:mb-18 space-y-3.5">
-          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-800 text-xs font-semibold uppercase tracking-wider">
+          <div
+            data-feature-badge
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-800 text-xs font-semibold uppercase tracking-wider"
+          >
             <span>Core Capabilities</span>
           </div>
-          <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+          <h2
+            data-feature-heading
+            className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight"
+          >
             Your Coursework. <span className="text-cyan-600">Your Mastery.</span>
           </h2>
-          <p className="text-sm sm:text-base text-slate-600 max-w-2xl mx-auto">
+          <p
+            data-feature-sub
+            className="text-sm sm:text-base text-slate-600 max-w-2xl mx-auto"
+          >
             8 autonomous AI capabilities designed specifically for modern students to learn faster and retain more.
           </p>
         </div>
@@ -98,11 +181,14 @@ export function FeaturesSection() {
           {FEATURES.map(({ icon: Icon, title, description, tag, color }) => (
             <div
               key={title}
-              className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 shadow-[0_4px_20px_-4px_rgba(15,23,42,0.03)] hover:shadow-[0_16px_36px_-6px_rgba(15,23,42,0.08)] hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group"
+              data-feature-card
+              className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 shadow-[0_4px_20px_-4px_rgba(15,23,42,0.03)] hover:shadow-[0_16px_36px_-6px_rgba(15,23,42,0.08)] hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between group will-change-transform"
             >
               <div>
                 <div className="flex items-center justify-between mb-5">
-                  <div className={`h-11 w-11 rounded-2xl flex items-center justify-center border shadow-xs ${color}`}>
+                  <div
+                    className={`h-11 w-11 rounded-2xl flex items-center justify-center border shadow-xs transition-transform duration-300 group-hover:scale-105 ${color}`}
+                  >
                     <Icon className="h-5 w-5" />
                   </div>
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200/60">
@@ -123,7 +209,7 @@ export function FeaturesSection() {
                   Explore feature
                 </span>
                 <div className="h-8 w-8 rounded-full bg-slate-900 group-hover:bg-cyan-600 text-white flex items-center justify-center shadow-xs transition-colors">
-                  <ArrowUpRight className="h-4 w-4" />
+                  <ArrowUpRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </div>
               </div>
             </div>

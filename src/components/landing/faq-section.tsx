@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { gsap, useGSAP, motion, getPrefersReducedMotion } from "@/lib/motion";
 
 const FAQS = [
   {
@@ -38,14 +39,13 @@ const FAQS = [
   },
 ];
 
-function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
+function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const itemRef = useRef<HTMLDivElement>(null);
 
   return (
     <div
-      className="border border-slate-200/80 rounded-2xl bg-white overflow-hidden shadow-xs hover:border-slate-300 hover:shadow-md transition-all duration-200"
+      data-faq-item
+      className="border border-slate-200/80 rounded-2xl bg-white overflow-hidden shadow-xs hover:border-slate-300 hover:shadow-md transition-all duration-200 will-change-transform"
     >
       <button
         onClick={() => setOpen(!open)}
@@ -55,16 +55,24 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
       >
         <span className="text-sm sm:text-base font-bold text-slate-900">{q}</span>
         <ChevronDown
-          className={`h-5 w-5 text-slate-500 flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180 text-cyan-600" : ""}`}
+          className={`h-5 w-5 text-slate-500 flex-shrink-0 transition-transform duration-300 ease-out ${
+            open ? "rotate-180 text-cyan-600" : ""
+          }`}
         />
       </button>
+
+      {/* Smooth, robust CSS Grid accordion transition */}
       <div
-        ref={contentRef}
-        className="overflow-hidden transition-all duration-200 ease-in-out"
-        style={{ maxHeight: open ? "500px" : "0px", opacity: open ? 1 : 0 }}
+        className="grid transition-[grid-template-rows,opacity] duration-300 ease-out"
+        style={{
+          gridTemplateRows: open ? "1fr" : "0fr",
+          opacity: open ? 1 : 0,
+        }}
       >
-        <div className="px-6 pb-5 pt-3 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-slate-100 bg-slate-50/40">
-          {a}
+        <div className="overflow-hidden">
+          <div className="px-6 pb-5 pt-3 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-slate-100 bg-slate-50/40">
+            {a}
+          </div>
         </div>
       </div>
     </div>
@@ -72,31 +80,102 @@ function FAQItem({ q, a, index }: { q: string; a: string; index: number }) {
 }
 
 export function FAQSection() {
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useGSAP(
+    () => {
+      if (getPrefersReducedMotion()) {
+        gsap.set(
+          ["[data-faq-badge]", "[data-faq-title]", "[data-faq-desc]", "[data-faq-item]"],
+          { opacity: 1, x: 0, y: 0, scale: 1, clearProps: "all" }
+        );
+        return;
+      }
+
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          start: "top 75%",
+          once: true,
+        },
+        defaults: { ease: motion.ease.standard },
+        onComplete: () => {
+          gsap.set("[data-faq-item]", { clearProps: "willChange" });
+        },
+      });
+
+      // 1. Header sequence
+      tl.fromTo(
+        "[data-faq-badge]",
+        { opacity: 0, y: 12, scale: 0.95 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: motion.ease.spring },
+        0
+      )
+        .fromTo(
+          "[data-faq-title]",
+          { opacity: 0, y: 20 },
+          { opacity: 1, y: 0, duration: motion.duration.normal, ease: motion.ease.smooth },
+          0.1
+        )
+        .fromTo(
+          "[data-faq-desc]",
+          { opacity: 0, y: 14 },
+          { opacity: 1, y: 0, duration: 0.55, ease: motion.ease.smooth },
+          0.2
+        )
+
+        // 2. FAQ items staggered cascade
+        .fromTo(
+          "[data-faq-item]",
+          { opacity: 0, y: 20 },
+          {
+            opacity: 1,
+            y: 0,
+            duration: 0.5,
+            stagger: 0.05,
+            ease: motion.ease.standard,
+          },
+          0.25
+        );
+    },
+    { scope: sectionRef }
+  );
+
   return (
     <section
+      ref={sectionRef}
       id="faqs"
       className="relative py-20 lg:py-28 bg-[#f8fafc] border-b border-slate-200/70"
     >
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div
-          className="text-center mb-12 sm:mb-14 space-y-3.5"
-        >
-          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white border border-slate-200 text-slate-800 shadow-xs">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">FAQ</span>
+        <div className="text-center mb-12 sm:mb-14 space-y-3.5">
+          <div
+            data-faq-badge
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white border border-slate-200 text-slate-800 shadow-xs"
+          >
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+              FAQ
+            </span>
           </div>
-          <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+          <h2
+            data-faq-title
+            className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight"
+          >
             Common <span className="text-cyan-600">Questions</span>
           </h2>
-          <p className="text-sm sm:text-base text-slate-600">
+          <p
+            data-faq-desc
+            className="text-sm sm:text-base text-slate-600"
+          >
             Everything you need to know about Neuron OS.
           </p>
         </div>
 
         {/* FAQ list */}
         <div className="space-y-3">
-          {FAQS.map((faq, index) => (
-            <FAQItem key={faq.q} {...faq} index={index} />
+          {FAQS.map((faq) => (
+            <FAQItem key={faq.q} {...faq} />
           ))}
         </div>
       </div>

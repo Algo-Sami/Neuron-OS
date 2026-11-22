@@ -1,7 +1,9 @@
 "use client";
 
+import { useRef } from "react";
 import Link from "next/link";
 import { Mail, Globe, ArrowRight, MapPin, MessageCircle } from "lucide-react";
+import { gsap, useGSAP, motion, getPrefersReducedMotion } from "@/lib/motion";
 
 const FOOTER_LINKS = {
   Product: [
@@ -67,6 +69,58 @@ const SOCIAL_LINKS = [
 ];
 
 export function LandingFooter() {
+  const footerRef = useRef<HTMLElement>(null);
+
+  useGSAP(
+    () => {
+      if (getPrefersReducedMotion()) {
+        gsap.set(["[data-footer-cta]", "[data-footer-content]"], {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          clearProps: "all",
+        });
+        return;
+      }
+
+      // Smooth CTA banner entrance
+      gsap.fromTo(
+        "[data-footer-cta]",
+        { opacity: 0, y: 24, scale: 0.98 },
+        {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          duration: 0.7,
+          ease: motion.ease.standard,
+          scrollTrigger: {
+            trigger: "[data-footer-cta]",
+            start: "top 80%",
+            once: true,
+          },
+        }
+      );
+
+      // Smooth main footer columns entrance
+      gsap.fromTo(
+        "[data-footer-content]",
+        { opacity: 0, y: 16 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.6,
+          ease: motion.ease.smooth,
+          scrollTrigger: {
+            trigger: "[data-footer-content]",
+            start: "top 85%",
+            once: true,
+          },
+        }
+      );
+    },
+    { scope: footerRef }
+  );
+
   const handleHashClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     if (href.startsWith("#") && href.length > 1) {
       e.preventDefault();
@@ -76,10 +130,13 @@ export function LandingFooter() {
   };
 
   return (
-    <footer className="relative bg-white border-t border-slate-200/70">
+    <footer ref={footerRef} className="relative bg-white border-t border-slate-200/70 overflow-hidden">
       {/* Wasmer-inspired dark contrast CTA Banner */}
       <div className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
-        <div className="relative rounded-3xl bg-slate-900 text-white p-8 sm:p-12 text-center overflow-hidden shadow-2xl">
+        <div
+          data-footer-cta
+          className="relative rounded-3xl bg-slate-900 text-white p-8 sm:p-12 text-center overflow-hidden shadow-2xl will-change-transform"
+        >
           <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
@@ -93,7 +150,7 @@ export function LandingFooter() {
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
               <Link
                 href="/login"
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3 text-xs sm:text-sm font-semibold text-slate-900 rounded-full bg-white hover:bg-slate-100 shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3 text-xs sm:text-sm font-semibold text-slate-900 rounded-full bg-white hover:bg-slate-100 shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
               >
                 Start Free Today
                 <ArrowRight className="h-4 w-4" />
@@ -102,7 +159,7 @@ export function LandingFooter() {
                 href="https://wa.me/923185005228"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 text-xs sm:text-sm font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-full shadow-xs hover:-translate-y-0.5 transition-all duration-200"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 text-xs sm:text-sm font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-full shadow-xs hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
               >
                 <MessageCircle className="h-4 w-4 text-emerald-400" />
                 WhatsApp Us
@@ -113,12 +170,15 @@ export function LandingFooter() {
       </div>
 
       {/* Main footer content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-slate-100">
+      <div
+        data-footer-content
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 border-t border-slate-100 will-change-transform"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
           {/* Brand column */}
           <div className="lg:col-span-2 space-y-4">
             <Link href="/" className="flex items-center gap-2.5 group w-fit">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900 text-white font-bold text-xs shadow-xs group-hover:scale-105 transition-transform">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900 text-white font-bold text-xs shadow-xs group-hover:scale-105 transition-transform duration-200">
                 <span className="text-cyan-400 font-mono">N</span>
               </div>
               <div className="flex flex-col leading-none">
@@ -168,7 +228,7 @@ export function LandingFooter() {
                   target={external ? "_blank" : undefined}
                   rel={external ? "noopener noreferrer" : undefined}
                   aria-label={label}
-                  className={`h-8 w-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-500 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${color}`}
+                  className={`h-8 w-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-500 shadow-xs hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 ${color}`}
                 >
                   {icon}
                 </a>

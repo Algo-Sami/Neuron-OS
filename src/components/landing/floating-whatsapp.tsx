@@ -1,18 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { X } from "lucide-react";
+import { gsap, useGSAP, motion, getPrefersReducedMotion } from "@/lib/motion";
 
 const WA_URL = "https://wa.me/923185005228";
 
 export function FloatingWhatsApp() {
   const [hovered, setHovered] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Gentle, non-intrusive entrance after hero settles
+  useGSAP(
+    () => {
+      if (getPrefersReducedMotion()) {
+        gsap.set(containerRef.current, { opacity: 1, scale: 1, clearProps: "all" });
+        return;
+      }
+
+      gsap.fromTo(
+        containerRef.current,
+        { opacity: 0, scale: 0.85, y: 10 },
+        { opacity: 1, scale: 1, y: 0, duration: 0.5, delay: 0.8, ease: motion.ease.spring }
+      );
+    },
+    { scope: containerRef }
+  );
 
   if (dismissed) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+    <div
+      ref={containerRef}
+      className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 will-change-transform"
+    >
       {/* Tooltip label */}
       <div
         className={`transition-all duration-200 ${
@@ -28,7 +50,7 @@ export function FloatingWhatsApp() {
               setDismissed(true);
             }}
             className="ml-1 text-slate-400 hover:text-slate-600 transition-colors"
-            aria-label="Dismiss"
+            aria-label="Dismiss support notification"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -45,12 +67,9 @@ export function FloatingWhatsApp() {
         aria-label="Chat with Neuron Support on WhatsApp"
         className="relative flex h-13 w-13 sm:h-14 sm:w-14 items-center justify-center rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 group"
       >
-        {/* Subtle cyan pulse ring */}
-        <span className="absolute inset-0 rounded-full border border-cyan-400/30 animate-ping opacity-25" />
-
         {/* WhatsApp icon */}
         <svg
-          className="h-6 w-6 text-emerald-400 fill-current group-hover:scale-110 transition-transform"
+          className="h-6 w-6 text-emerald-400 fill-current group-hover:scale-110 transition-transform duration-200"
           viewBox="0 0 24 24"
           xmlns="http://www.w3.org/2000/svg"
           aria-hidden="true"
